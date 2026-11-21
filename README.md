@@ -23,8 +23,15 @@ Keys: Space plays and pauses, M sound, **T no text** (only the picture; the cont
 
 ## Recording
 
-- **Rec button (quick, real time).** Records the canvas, with sound if Sound is on, to an MP4 or WebM as fast as your GPU draws. Text is never in it. Save asks for confirmation inside claude.ai and downloads directly anywhere else.
-- **`tools/film.mjs` (perfect, frame by frame).** Replaces the page's clock, renders every frame however slowly, renders the soundtrack offline from the same timeline, and joins them with ffmpeg. With or without text (`--clean`), any size (`--width 1080 --height 1920` for vertical clips), any part (`--from 2 --to 3`). Run it locally (notes at the top of the file) or from **Actions → Film → Run workflow**; the MP4 appears under the run's Artifacts. Software rendering is slow: a one-stage clip at 1080p takes from minutes (Julia, Ship) to hours (deep Mandelbrot, Mandelbulb). `--scale 0.5` is four times quicker.
+**Rec (the way to make the films).** On a computer with a graphics card (any recent Mac), the page draws in real time, so it can film itself:
+
+1. Choose **All** for the whole tour, or one fractal for its journey alone. Leave it stopped.
+2. Press **Rec** (or R). It goes back to the start, turns the sound on, plays the journey once, and stops by itself back on the overview, with the sound faded out.
+3. Press **Save video**.
+
+Films are 1920 × 1080 (1080 × 1920 if the window is taller than it is wide, or with `?vertical`), whatever the window size, with each stage's title, place and note fading in and out as on the page. Press **Text** first for a film with no words at all. Pressing Rec while a journey is already playing records from that moment until you press Stop. The whole tour is about 15 minutes; Mandelbrot alone about 6.
+
+**`tools/film.mjs` (frame by frame, in software).** Replaces the page's clock and renders every frame however slowly, with the soundtrack rendered offline from the same timeline. Without a graphics card that is slow: a deep full-HD Mandelbrot frame takes over 30 seconds, so the GitHub **Film** workflow suits short clips (one stage with `from`/`to`, lower `scale`, smaller sizes), not whole journeys. `--strips 4` computes each deep view over four frames, about four times quicker. `--set all` films the tour, and `tools/join.mjs` joins separate films with the tour's dissolves.
 
 Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=…&span=…` overrides that stage's view (for finding new places), `?scale=1` fixes the resolution, `?still` freezes the colour flow, `?clean` hides the text, `?autoplay` starts playing.
 

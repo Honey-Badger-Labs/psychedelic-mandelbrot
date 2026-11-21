@@ -1,7 +1,9 @@
 // Psychedelic Mandelbrot: procedural soundtrack.
 // One voice per stage, all generated live with the Web Audio API (no audio files), crossfaded by the
 // journey. Under them runs an endless Shepard-Risset glissando tied to the zoom: it rises for as long
-// as you dive and falls as you pull back, and never arrives, like the set itself.
+// as you dive and falls as you pull back, and never arrives, like the set itself. Tuned for stillness:
+// soft pads, sparse bells that ring like singing bowls, and a glissando kept low and distant, since the
+// long deep dives made a louder one tiring.
 // Everything is tuned around A.
 (function (global) {
   "use strict";
@@ -11,14 +13,14 @@
 
   // voices: chord (semitones above A1), pad timbre, filter, how fast it breathes, and an optional bell figure
   var VOICES = {
-    overview: { chord: [0, 7, 12, 16, 19, 24], wave: "sine", cutoff: 1400, breathe: 0.05, bells: [24, 28, 31, 35], every: 2.6 },
-    seahorse: { chord: [-3, 4, 9, 12, 16, 23], wave: "triangle", cutoff: 1800, breathe: 0.08, bells: [28, 31, 35, 40, 43], every: 1.3 },
-    elephant: { chord: [-7, 0, 5, 9, 12, 17], wave: "sawtooth", cutoff: 520, breathe: 0.03, bells: [17, 21, 24], every: 3.4 },
-    spiral: { chord: [2, 9, 14, 17, 21, 26], wave: "triangle", cutoff: 2200, breathe: 0.11, bells: [26, 29, 33, 36, 38, 41], every: 0.65 },
-    tendril: { chord: [-5, 2, 7, 10, 14, 19], wave: "sine", cutoff: 1600, breathe: 0.06, bells: [26, 31, 34, 38], every: 1.9 },
-    minibrot: { chord: [0, 7, 11, 14, 19, 23], wave: "sawtooth", cutoff: 900, breathe: 0.04, bells: [31, 35, 38, 43, 47], every: 1.0 },
-    star: { chord: [-2, 5, 10, 14, 17, 22], wave: "triangle", cutoff: 1300, breathe: 0.07, bells: [29, 34, 38, 41], every: 1.6 },
-    abyss: { chord: [-12, -5, 0, 3, 7, 10], wave: "sawtooth", cutoff: 380, breathe: 0.025, bells: [24, 27, 31], every: 4.2 }
+    overview: { chord: [0, 7, 12, 16, 19, 24], wave: "sine", cutoff: 1100, breathe: 0.03, bells: [24, 28, 31, 35], every: 5.5 },
+    seahorse: { chord: [-3, 4, 9, 12, 16, 23], wave: "triangle", cutoff: 1100, breathe: 0.045, bells: [28, 31, 35, 40], every: 4.2 },
+    elephant: { chord: [-7, 0, 5, 9, 12, 17], wave: "triangle", cutoff: 600, breathe: 0.02, bells: [17, 21, 24], every: 6.5 },
+    spiral: { chord: [2, 9, 14, 17, 21, 26], wave: "sine", cutoff: 1300, breathe: 0.06, bells: [26, 29, 33, 36, 38], every: 3.2 },
+    tendril: { chord: [-5, 2, 7, 10, 14, 19], wave: "sine", cutoff: 1100, breathe: 0.035, bells: [26, 31, 34, 38], every: 4.8 },
+    minibrot: { chord: [0, 7, 11, 14, 19, 23], wave: "triangle", cutoff: 800, breathe: 0.025, bells: [31, 35, 38, 43], every: 3.8 },
+    star: { chord: [-2, 5, 10, 14, 17, 22], wave: "triangle", cutoff: 950, breathe: 0.04, bells: [29, 34, 38, 41], every: 4.4 },
+    abyss: { chord: [-12, -5, 0, 3, 7, 10], wave: "triangle", cutoff: 420, breathe: 0.018, bells: [24, 27, 31], every: 7.5 }
   };
 
   function createSoundtrack(ctx, dest, names) {
@@ -38,8 +40,8 @@
     }
 
     // master: a long, wide reverb (this is a place of echoes), glue, a limiter
-    var master = gain(0), mix = gain(1), wet = gain(0.55);
-    var hp = filt("highpass", 38, 0.7), verb = ctx.createConvolver(); verb.buffer = impulse(5.5, 2.2);
+    var master = gain(0), mix = gain(1), wet = gain(0.7);
+    var hp = filt("highpass", 38, 0.7), verb = ctx.createConvolver(); verb.buffer = impulse(7, 2.4);
     var comp = ctx.createDynamicsCompressor(); comp.threshold.value = -20; comp.ratio.value = 3;
     var limit = ctx.createDynamicsCompressor(); limit.threshold.value = -3; limit.ratio.value = 12; limit.attack.value = 0.005;
     chain(mix, hp, comp); chain(hp, verb, wet, comp); chain(comp, limit, master, dest);
@@ -56,7 +58,7 @@
         var pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
         [-7, 7].forEach(function (cents) {
           var o = osc(s.wave, hz(n), cents + (i % 2 ? 3 : -3)); owned.push(o);
-          var g = gain(s.wave === "sawtooth" ? 0.22 : 0.4);
+          var g = gain(s.wave === "triangle" ? 0.3 : 0.4);
           if (pan) { pan.pan.value = (i / (s.chord.length - 1)) * 1.4 - 0.7; chain(o, g, pan); } else chain(o, g, pad);
         });
         if (pan) pan.connect(pad);
@@ -75,13 +77,14 @@
       if (!this.out || now < this.next) return;
       var s = this.spec, n = s.bells[(this.step * 3 + (this.step >> 2)) % s.bells.length]; this.step++;
       var when = this.next; this.next = when + s.every * (0.75 + Math.random() * 0.5);
-      // a struck tone with one inharmonic partial, like glass
-      [[1, 1], [2.76, 0.25]].forEach(function (p) {
-        var o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = hz(n) * p[0];
+      // a soft strike that rings a long time, like a singing bowl: a slow attack (no click), a faint
+      // inharmonic partial, and a slight beating between two near-equal tones
+      [[1, 1, 0], [1, 0.6, 1.8], [2.76, 0.12, 0]].forEach(function (p) {
+        var o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = hz(n) * p[0] + p[2];
         var g = ctx.createGain(); g.gain.setValueAtTime(0, when);
-        g.gain.linearRampToValueAtTime(0.055 * level * p[1], when + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, when + (p[0] > 1 ? 1.2 : 3.5));
-        o.connect(g); g.connect(mix); o.start(when); o.stop(when + 3.6);
+        g.gain.linearRampToValueAtTime(0.026 * level * p[1], when + 0.06);
+        g.gain.exponentialRampToValueAtTime(0.0001, when + (p[0] > 1 ? 2.5 : 7));
+        o.connect(g); g.connect(mix); o.start(when); o.stop(when + 7.1);
       });
     };
 
@@ -89,7 +92,7 @@
 
     // the endless glissando: eight sines an octave apart, loudest in the middle, sliding together
     var SHEP = 8, shepOut = gain(0), shep = [], shepPhase = 0;
-    chain(shepOut, filt("lowpass", 2600, 0.5), mix);
+    chain(shepOut, filt("lowpass", 1000, 0.5), mix);
     for (var i = 0; i < SHEP; i++) { var o = osc("sine", 40); var g = gain(0); chain(o, g, shepOut); shep.push({ o: o, g: g }); }
     function shepard(now) {
       for (var i = 0; i < SHEP; i++) {
@@ -100,7 +103,7 @@
         // a voice wrapping from top to bottom is silent there, so it jumps without a click
         if (prev !== undefined && Math.abs(pos - prev) > SHEP / 2) shep[i].o.frequency.setValueAtTime(f, now);
         else smooth(shep[i].o.frequency, f, now, 0.06);
-        smooth(shep[i].g.gain, Math.exp(-x * x) * 0.09, now, 0.06);
+        smooth(shep[i].g.gain, Math.exp(-x * x) * 0.022, now, 0.06);
       }
     }
 
@@ -137,8 +140,9 @@
         var L = Math.log2(C.span), rate = lastSpan && dt > 0 ? (lastSpan - L) / dt : 0;
         lastSpan = L;
         rate = Math.max(-6, Math.min(6, rate));
-        shepPhase += rate * dt * 0.06;
-        smooth(shepOut.gain, Math.min(1, Math.abs(rate) / 2.5), now, 0.5);
+        // half the speed it used to glide at, and swelling in and out over seconds rather than following every change
+        shepPhase += rate * dt * 0.03;
+        smooth(shepOut.gain, Math.min(0.7, Math.sqrt(Math.abs(rate)) / 2.2), now, 2);
         shepard(now);
       }
     };

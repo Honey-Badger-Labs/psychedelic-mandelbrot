@@ -8,10 +8,11 @@
 // replaced by one this script advances exactly one frame at a time, so the film has no dropped frames however
 // slow the machine. The soundtrack is rendered separately, offline, from the same timeline, then joined on.
 //
-//   --set      mandelbrot | julia | ship | bulb | buddha
+//   --set      mandelbrot | julia | ship | bulb | buddha | all (the tour: every set in turn, dissolving between them)
 //   --from/--to  stage numbers. --to defaults to a full loop, back to the first stage.
 //   --clean    no text at all: just the picture (for social clips)
 //   --scale    render resolution as a fraction of the frame (default 1; 0.5 is four times quicker)
+//   --strips   compute each deep view over this many frames (default 1; 4 is about four times quicker)
 //   For a vertical clip use --width 1080 --height 1920.
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, createWriteStream, rmSync } from "node:fs";
@@ -31,6 +32,9 @@ const SET = arg("set", "mandelbrot");
 const OUT = path.resolve(arg("out", `psychedelic-${SET}.mp4`));
 const FROM = +arg("from", 0), TO = arg("to", null);
 const CLEAN = flag("clean"), SCALE = +arg("scale", 1);
+// compute each deep view over this many frames, showing it moved and scaled in between (as the live page does).
+// 4 is about four times quicker on deep stages, and the difference is hard to see
+const STRIPS = +arg("strips", 1);
 const SITE = arg("site", "http://localhost:8765");
 const CHROME = arg("chrome", process.env.CHROME || "");
 const HEAD = +arg("head", 2.5);      // seconds held on the first stage before the journey moves
@@ -38,9 +42,11 @@ const TAIL = +arg("tail", 8);        // seconds after the last stage, while the 
 const RATE = 48000;
 
 const { sets } = JSON.parse(readFileSync(path.join(root, "data/sets.json"), "utf8"));
-const set = sets.find((s) => s.id === SET);
-if (!set) throw new Error(`No set "${SET}". Choose one of: ${sets.map((s) => s.id).join(", ")}`);
-const N = set.stages.length;
+const TOUR = SET === "all";
+const set = TOUR ? sets[0] : sets.find((s) => s.id === SET);
+if (!set) throw new Error(`No set "${SET}". Choose one of: ${sets.map((s) => s.id).join(", ")}, all`);
+// the tour travels every stage of every set, back to the first overview
+const N = TOUR ? sets.reduce((n, s) => n + s.stages.length, 0) : set.stages.length;
 const SPAN = (TO === null ? N : +TO) - FROM;     // stages to travel
 if (!(SPAN > 0)) throw new Error("--to must be after --from");
 
@@ -107,12 +113,12 @@ await page.route("**/*", (r) => {
   return r.abort();
 });
 await page.addInitScript(virtualClock);
-const url = `${SITE}/index.html?film&scale=${SCALE}&set=${SET}&at=${FROM}${CLEAN ? "&clean" : ""}`;
+const url = `${SITE}/index.html?film&scale=${SCALE}&set=${set.id}&at=${FROM}${TOUR ? "&tour" : ""}${CLEAN ? "&clean" : ""}&strips=${STRIPS}`;
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
 const step = (ms) => page.evaluate((x) => window.__advance(x), ms);
 await page.waitForFunction(() => window.__mandel && window.__mandel.set, null, { timeout: 60000 });
 await page.evaluate(() => document.fonts.ready);
-for (let i = 0; i < 90; i++) await step(1000 / FPS);       // warm-up draws and the first text, unfilmed
+for (let i = 0; i < +arg("warmup", 90); i++) await step(1000 / FPS);       // warm-up draws and the first text, unfilmed
 
 const silent = OUT + ".video.mp4";
 const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "png", "-i", "-",
@@ -125,8 +131,8 @@ for (;;) {
   const time = frame / FPS;
   if (!started && time >= HEAD) { await page.evaluate(() => document.getElementById("play").click()); started = true; }
   await step(1000 / FPS);
-  const s = await page.evaluate(() => ({ T: window.__mandel.T, span: window.__mandel.span, progress: window.__mandel.progress, phase: window.__mandel.phase }));
-  track.push([s.T, s.span]);
+  const s = await page.evaluate(() => ({ T: window.__mandel.T, span: window.__mandel.span, progress: window.__mandel.progress, phase: window.__mandel.phase, set: window.__mandel.set }));
+  track.push([s.T, s.span, s.set]);
   const shot = await cdp.send("Page.captureScreenshot", { format: "png", optimizeForSpeed: true });
   if (!ff.stdin.write(Buffer.from(shot.data, "base64"))) await new Promise((r) => ff.stdin.once("drain", r));
   frame++;
@@ -136,7 +142,7 @@ for (;;) {
     if (time - restFrom > 7) { endedAt = time; await page.evaluate(() => document.getElementById("play").click()); }
   }
   if (endedAt >= 0 && time - endedAt >= TAIL) break;
-  if (frame % 60 === 0) process.stdout.write(`\r${frame} frames, ${s.progress.toFixed(2)} of ${SPAN} stages, ${(frame / ((Date.now() - t0) / 1000)).toFixed(2)} frames/s   `);
+  if (frame % 10 === 0) process.stdout.write(`\r${frame} frames, ${s.progress.toFixed(2)} of ${SPAN} stages, ${(frame / ((Date.now() - t0) / 1000)).toFixed(2)} frames/s   `);
 }
 ff.stdin.end();
 await new Promise((r) => ff.on("close", r));
@@ -152,7 +158,7 @@ await snd.exposeFunction("__wav", (b64) => { sink.write(Buffer.from(b64, "base64
 await snd.goto(SITE + "/tools/film-audio.html", { waitUntil: "load", timeout: 60000 });
 await snd.evaluate((o) => window.renderFilmAudio(o), {
   track, fps: FPS, head: HEAD, endedAt, seconds, rate: RATE,
-  names: [...set.stages].sort((a, b) => a.stage - b.stage).map((s) => s.sound),
+  voices: Object.fromEntries(sets.map((x) => [x.id, [...x.stages].sort((a, b) => a.stage - b.stage).map((s) => s.sound)])),
 });
 await new Promise((r) => sink.end(r));
 await browser.close();

@@ -114,6 +114,8 @@ body.clean .ctl,body.clean .sets{transition:opacity .8s}
 body.clean.idle .ctl,body.clean.idle .sets{opacity:0;pointer-events:none}
 body.clean.idle{cursor:none}
 body.film .ctl,body.film .sets,body.film #fps{display:none!important}
+/* while recording, the canvas has the film's shape; the window shows it whole */
+body.recording canvas{object-fit:contain;background:#000}
 @media (max-width:760px){.ticks i:not(:first-child):not(:last-child){display:none}}
 #info{display:none}
 @media (max-width:600px){
@@ -519,6 +521,7 @@ function sizeTargets(w,h){
 
 // render resolution. Auto adapts to the GPU, but only while the view rests or between stages: changing
 // it mid-dive makes the picture visibly jump, so a move keeps the resolution it started with
+var recSize=null;   // while recording: the film's size in pixels, whatever the window
 var SCALES=[0,.5,.75,1],qi=0,autoScale=.75,qBtn=document.getElementById("q");
 var coarse=window.matchMedia&&window.matchMedia("(pointer:coarse)").matches;
 if(coarse)autoScale=.5;
@@ -526,6 +529,7 @@ var Q=location.search;
 var FIXED=/[?&]scale=([\d.]+)/.exec(Q);
 qBtn.addEventListener("click",function(){qi=(qi+1)%SCALES.length;qBtn.textContent=SCALES[qi]?Math.round(SCALES[qi]*100)+"%":"Auto";dirty=true;});
 function wantSize(){
+  if(recSize)return recSize;
   var dpr=Math.min(window.devicePixelRatio||1,2);
   var s=FIXED?parseFloat(FIXED[1]):SCALES[qi]||autoScale;
   return [Math.max(64,Math.round(canvas.clientWidth*dpr*s)),Math.max(64,Math.round(canvas.clientHeight*dpr*s))];
@@ -573,7 +577,7 @@ function glide(x,ramp){
 }
 var SET=null,STAGES=[],SOURCES={},SETS=[],LAST=1,HOME={re:-.6,im:0,span:3};
 var LABELS={exact:"Exact",computed:"Computed",art:"Artistic choice"};
-var RAMP=2.6;   // seconds to reach full speed, and to come to rest
+var RAMP=2.6,MIN_MOVE=14;   // seconds to reach full speed, and to come to rest
 
 // one move from stage k to the next, with its timings
 var legCache={};
@@ -587,10 +591,12 @@ function legOf(k){
     var dOut=g.Lh-g.Lk,dIn=g.Lh-g.Ln;
     g.outS=dOut>.01?2.2+dOut/2.6:0;
     g.inS=2.6+dIn/(SET.speed||1.05);
+    // a calm minimum: shallow stages (Julia, the ship) used to be over in six seconds
+    var stretch=Math.max(1,MIN_MOVE/(g.outS+g.inS));g.outS*=stretch;g.inS*=stretch;
     g.secs=(g.outS+g.inS)*(B.pace||1);
     g.a=g.outS/(g.outS+g.inS);
-  }else if(SET.kind==="bulb"){g.secs=16*(B.pace||1);}
-  else{g.secs=11*(B.pace||1);}
+  }else if(SET.kind==="bulb"){g.secs=20*(B.pace||1);}
+  else{g.secs=14*(B.pace||1);}
   return legCache[key]=g;
 }
 function towards(t,L){
@@ -936,10 +942,63 @@ function saveVideo(blob,url,name){
   var a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
   out.textContent="Saving "+name+". If nothing happens, this view blocks downloads: open the page from its GitHub Pages address.";
 }
-recBtn.addEventListener("click",function(){
-  if(recorder){recorder.stop();return;}
-  if(!window.MediaRecorder||!canvas.captureStream){showToast('<p>This browser cannot record video. Try a current Chrome, Edge, Firefox or Safari, or use <code>tools/film.mjs</code>.</p><div class="row"><button type="button" data-close>Close</button></div>');return;}
-  var stream=canvas.captureStream(FILM?0:60);
+// The recording is drawn on its own canvas: the picture, and (unless Text is off) each stage's title and
+// place, fading in and out with the page's text. Recording from a standstill films one whole journey:
+// back to the start, play, and stop by itself after returning to the overview.
+var recCanvas=document.createElement("canvas"),rctx=recCanvas.getContext("2d"),recTitle=0,recJourney=null;
+function recordTitles(dt){
+  var e=textStage>=0&&STAGES[textStage],show=e&&read.classList.contains("in")&&!document.body.classList.contains("clean");
+  recTitle+=((show?1:0)-recTitle)*Math.min(1,dt*(show?.9:2.5));
+  if(recTitle<.01||!e)return;
+  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,x=Math.round(w*.06),a=recTitle*recTitle*(3-2*recTitle);
+  var g=rctx.createLinearGradient(0,h*.55,0,h);g.addColorStop(0,"rgba(6,3,15,0)");g.addColorStop(1,"rgba(6,3,15,"+(.72*a)+")");
+  rctx.fillStyle=g;rctx.fillRect(0,h*.55,w,h*.45);
+  rctx.globalAlpha=a;rctx.textBaseline="alphabetic";
+  rctx.shadowColor="rgba(6,3,15,.85)";rctx.shadowBlur=18*u;
+  rctx.font="italic 500 "+Math.round(84*u)+"px 'Cormorant Garamond', Georgia, serif";
+  var tw=rctx.measureText(e.title).width,tg=rctx.createLinearGradient(x,0,x+Math.max(1,tw),0);
+  [0,.5,1].forEach(function(k){tg.addColorStop(k,palColour(e.palette,.08+.7*k));});
+  var ny=h-Math.round(110*u),lines=[],words=e.note.split(" "),line="";
+  rctx.font=Math.round(25*u)+"px 'IBM Plex Mono', Menlo, monospace";
+  words.forEach(function(wd){var t=line?line+" "+wd:wd;if(rctx.measureText(t).width>w*.6&&line){lines.push(line);line=wd;}else line=t;});
+  if(line)lines.push(line);
+  var top=ny-(lines.length-1)*36*u;
+  rctx.fillStyle="rgba(241,236,247,.72)";
+  lines.forEach(function(l,i){rctx.fillText(l,x,top+i*36*u);});
+  rctx.fillStyle="#f1ecf7";rctx.font="500 "+Math.round(27*u)+"px 'IBM Plex Mono', Menlo, monospace";
+  rctx.fillText(e.place+"  /  "+e.scale,x,top-58*u);
+  rctx.font="italic 500 "+Math.round(84*u)+"px 'Cormorant Garamond', Georgia, serif";rctx.fillStyle=tg;
+  rctx.fillText(e.title,x,top-110*u);
+  rctx.globalAlpha=1;rctx.shadowBlur=0;
+}
+function recordFrame(dt){
+  if(!recorder)return;
+  if(recCanvas.width!==W||recCanvas.height!==H){recCanvas.width=W;recCanvas.height=H;}
+  rctx.drawImage(canvas,0,0);
+  recordTitles(dt);
+  // a journey ends where it began: back on the overview, rested, with the sound faded. Counted in the page's
+  // own frame time, and the view is held still meanwhile, so a slow machine cannot drift on into another lap
+  if(recJourney&&progress-recJourney.from>=recJourney.stages-1e-6&&phase==="holding"){
+    hold=Math.max(hold,1);
+    recJourney.rest=(recJourney.rest||0)+dt;
+    if(recJourney.rest>7&&!recJourney.ending){recJourney.ending=true;if(SND)SND.setOn(false,4);}
+    if(recJourney.rest>11.5){var r=recorder;recJourney=null;stop();if(r)r.stop();if(SND&&soundOn)SND.setOn(true,2);}
+  }
+}
+function startRecording(){
+  if(!window.MediaRecorder||!recCanvas.captureStream){showToast('<p>This browser cannot record video. Try a current Chrome, Edge, Firefox or Safari.</p><div class="row"><button type="button" data-close>Close</button></div>');return;}
+  var journey=!playing;
+  // the film's shape: landscape full HD, or vertical for phones when the window is taller than wide
+  recSize=/[?&]vertical/.test(Q)||canvas.clientHeight>canvas.clientWidth?[1080,1920]:[1920,1080];
+  var rs=/[?&]recsize=(\d+)x(\d+)/.exec(Q);if(rs)recSize=[+rs[1],+rs[2]];   // for quick test recordings
+  document.body.classList.add("recording");dirty=true;
+  if(journey){
+    if(!soundOn)sndBtn.click();
+    if(tour)useSet(SETS[0].id,0);else setT(0);
+    recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST};
+  }else recJourney=null;
+  recCanvas.width=recSize[0];recCanvas.height=recSize[1];rctx.fillStyle="#06030f";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
+  var stream=recCanvas.captureStream(FILM?0:60);
   if(soundOn&&AC){
     if(!recDest){recDest=AC.createMediaStreamDestination();soundOut.connect(recDest);}
     recDest.stream.getAudioTracks().forEach(function(t){stream.addTrack(t);});
@@ -948,20 +1007,25 @@ recBtn.addEventListener("click",function(){
   try{recorder=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:24e6}:{});}
   catch(e){recorder=new MediaRecorder(stream);}
   recChunks=[];
+  var label=journey?(tour?"all":SET.id):SET.id;
   recorder.ondataavailable=function(e){if(e.data&&e.data.size)recChunks.push(e.data);};
   recorder.onstop=function(){
     var mime=recorder.mimeType||type||"video/webm",ext=/mp4/.test(mime)?"mp4":"webm";
     var blob=new Blob(recChunks,{type:mime}),url=URL.createObjectURL(blob);
-    var name="psychedelic-"+SET.id+"-"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+"."+ext;
-    recorder=null;recBtn.classList.remove("on");recBtn.textContent="Rec";recBtn.setAttribute("aria-pressed","false");
+    var name="psychedelic-"+label+"-"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+"."+ext;
+    recorder=null;recJourney=null;recSize=null;document.body.classList.remove("recording");dirty=true;
+    recBtn.classList.remove("on");recBtn.textContent="Rec";recBtn.setAttribute("aria-pressed","false");
     showToast('<video src="'+url+'" controls playsinline></video><p>'+(blob.size/1048576).toFixed(1)+' MB, '+ext.toUpperCase()+
-      (soundOn?', with sound.':', silent (turn Sound on before recording to include it).')+
+      (recChunks.length&&soundOn?', with sound.':', silent (turn Sound on before recording to include it).')+
       '</p><p id="saved"></p><div class="row"><button type="button" id="save">Save video</button><button type="button" data-close>Close</button></div>');
     document.getElementById("save").addEventListener("click",function(){saveVideo(blob,url,name);});
   };
   recorder.start(1000);
   recBtn.classList.add("on");recBtn.textContent="Stop";recBtn.setAttribute("aria-pressed","true");
-});
+  // a moment on the first stage, its title arriving, before the journey moves
+  if(journey)setTimeout(function(){if(recorder&&!playing)toggle();},1500);
+}
+recBtn.addEventListener("click",function(){if(recorder){recorder.stop();return;}startRecording();});
 
 window.addEventListener("keydown",function(e){
   if(e.target===slider||e.metaKey||e.ctrlKey)return;
@@ -1014,7 +1078,7 @@ function nextInTour(){
 // =====================================================================================================
 var dirty=true,time=0,clockFrozen=/[?&]still/.test(Q);
 var magEl=document.getElementById("mag"),itEl=document.getElementById("iters"),whereEl=document.getElementById("where");
-var lightA=.7,frameMs=16,slowFor=0,fastFor=0,tRate=0;
+var lightA=.7,frameMs=16,slowFor=0,fastFor=0,tRate=0,lastDt=1/60;
 function adaptResolution(dt,moving){
   if(SCALES[qi]||FIXED||recorder||FILM)return;
   // judged over a couple of seconds, and applied only while the view rests or between stages
@@ -1047,9 +1111,11 @@ function drawDissolve(dt){
 }
 function camKey(C){return [SET.id,C.re,C.im,C.span,C.rot,C.iter,C.kr,C.ki,W,H,lift].join(",");}
 // where the camera will be after n more frames at the current pace (never past the stage it is heading for)
+// a film may spread each view over several frames too (?film&strips=4): its clock is exact, so the aim is too
+var FILM_STRIPS=Math.max(1,Math.min(16,parseInt((/[?&]strips=(\d+)/.exec(Q)||[0,1])[1],10)||1));
 function predicted(C,n){
-  if(!tRate||FILM)return C;
-  var k=Math.floor(T+1e-9),t=Math.min(k+1,T+tRate*n*frameMs/1000);
+  if(!tRate||(FILM&&FILM_STRIPS<2))return C;
+  var k=Math.floor(T+1e-9),t=Math.min(k+1,T+tRate*n*(FILM?lastDt:frameMs/1000));
   var P=camAt(t);return P;
 }
 function escapeCompute(C){
@@ -1057,7 +1123,7 @@ function escapeCompute(C){
   if(!FILM){
     stripTimer+=frameMs/1000;
     if(stripTimer>.3){stripTimer=0;if(frameMs>21&&strips<16)strips++;else if(frameMs<15&&strips>1)strips--;}
-  }else strips=1;
+  }else strips=FILM_STRIPS;
   if(!back.active&&(dirty||!front.cam||front.cam.key!==camKey(C))){
     var target=front.cam?predicted(C,strips+1):C;
     target.key=camKey(C)===camKey(target)?camKey(C):camKey(target);
@@ -1163,6 +1229,9 @@ function hud(C){
 function getJSON(u){return fetch(u).then(function(r){if(!r.ok)throw new Error(u+" "+r.status);return r.json();});}
 Promise.all([getJSON("data/sets.json"),getJSON("data/sources.json")]).then(function(d){
   SETS=d[0].sets;
+  // the "Loading the map" placeholder is plain text, which the letter-by-letter exit does not hide: clear it
+  read.classList.remove("in");read.classList.add("out");
+  ["title","note","place","scale","src"].forEach(function(id){document.getElementById(id).textContent="";});
   SETS.forEach(function(s){s.stages.sort(function(a,b){return a.stage-b.stage;});});
   d[1].sources.forEach(function(so){SOURCES[so.id]=so;});
   // All: Play tours every set in turn. Choosing one set loops just that one
@@ -1197,7 +1266,7 @@ Promise.all([getJSON("data/sets.json"),getJSON("data/sources.json")]).then(funct
 var last=performance.now(),frames=0,acc=0,fpsEl=document.getElementById("fps"),hudTick=0;
 function frame(now){
   frameMs=frameMs*.9+(now-last)*.1;
-  var dt=Math.min(.05,(now-last)/1000);last=now;
+  var dt=Math.min(.05,(now-last)/1000);last=now;lastDt=dt;
   if(!clockFrozen){time+=dt;lightA+=dt*.05;}
   if(glideTo!==null){
     if(playing)glideTo=null;
@@ -1229,6 +1298,7 @@ function frame(now){
     adaptResolution(dt,moving);
     draw(C);
     drawDissolve(dt);
+    recordFrame(dt);
     if(SND&&soundOn)SND.update(T,C);
     hudTick+=dt;
     if(hudTick>.1){hudTick=0;hud(C);}
@@ -1238,7 +1308,7 @@ function frame(now){
   if(acc>=1){fpsEl.textContent="prototype 2.0 / "+Math.round(frames/acc)+" fps / "+W+"×"+H;frames=0;acc=0;}
   requestAnimationFrame(frame);
 }
-window.__mandel={get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
+window.__mandel={leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
   get playing(){return playing;},get set(){return SET&&SET.id;},stages:function(){return STAGES;},span:0};
 requestAnimationFrame(frame);
 })();
