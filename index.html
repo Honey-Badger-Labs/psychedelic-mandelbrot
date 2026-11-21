@@ -533,7 +533,11 @@ function wantSize(){
   if(recSize)return recSize;
   var dpr=Math.min(window.devicePixelRatio||1,2);
   var s=FIXED?parseFloat(FIXED[1]):SCALES[qi]||autoScale;
-  return [Math.max(64,Math.round(canvas.clientWidth*dpr*s)),Math.max(64,Math.round(canvas.clientHeight*dpr*s))];
+  var w=canvas.clientWidth*dpr*s,h=canvas.clientHeight*dpr*s;
+  // Auto never draws more than about full HD: a large Retina screen asked for nearly 3 million pixels a
+  // frame, which looks no better and made frames late
+  if(!FIXED&&!SCALES[qi]&&w*h>2.1e6){var f=Math.sqrt(2.1e6/(w*h));w*=f;h*=f;}
+  return [Math.max(64,Math.round(w)),Math.max(64,Math.round(h))];
 }
 
 // =====================================================================================================
@@ -719,8 +723,12 @@ function buddhaTracer(){
     }
   }
   // what a worker sends: the counts added since last time (the page adds up every worker's)
-  function take(){var h=st.hist,t=st.traced;st.hist=new Float32Array(h.length);st.traced=0;return {hist:h,traced:t};}
-  return {start:start,run:run,take:take,state:function(){return st;}};
+  // the page sends buffers back once it has added them up, so nothing new is allocated (each was megabytes,
+  // several times a second, and the clean-ups after them stuttered the page)
+  var spare=[];
+  function give(b){if(st&&b.length===st.hist.length&&spare.length<3){b.fill(0);spare.push(b);}}
+  function take(){var h=st.hist,t=st.traced;st.hist=spare.pop()||new Float32Array(h.length);st.traced=0;return {hist:h,traced:t};}
+  return {start:start,run:run,take:take,give:give,state:function(){return st;}};
 }
 // exposure from a high percentile, not the maximum, so a few hot pixels cannot darken the picture
 // and from a low percentile, not zero: up close the figure is a glow over the whole window, and its
@@ -740,8 +748,9 @@ function histLevels(h,n){
 var buddha={slots:[0,1].map(function(){var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);nearest();return {tex:t,key:"",cam:null,levels:[1,1,1,0,0,0],traced:0,acc:null,dirty:false,up:0,lv:0};}),
   tracing:-1,key:"",workers:null,local:null};
 var FILM=/[?&]film/.test(Q);
-// one worker per spare core, up to six
-var BUDDHA_WORKERS=Math.max(1,Math.min(6,(navigator.hardwareConcurrency||4)-1));
+// Workers: half the cores less one, at most four, each resting a fifth of the time. Six workers on every
+// spare core starved the sound (it crackled) and the page's own drawing (it stuttered)
+var BUDDHA_WORKERS=Math.max(1,Math.min(4,Math.floor((navigator.hardwareConcurrency||4)/2)-1));
 function buddhaKey(st){return [SET.id,st,W,H,lift].join(",");}
 function slotFor(key){for(var i=0;i<2;i++)if(buddha.slots[i].key===key)return buddha.slots[i];return null;}
 function buddhaStart(stage,keep){
@@ -764,19 +773,21 @@ function buddhaStart(stage,keep){
   if(FILM||!window.Worker){buddha.local=buddha.local||buddhaTracer();buddha.local.start(p);return;}
   if(!buddha.workers){
     var src="var T=("+buddhaTracer.toString()+")();var gen=0;"+
-      "onmessage=function(e){if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen,d=e.data;"+
-      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<450)T.run(2000);"+
-      "var r=T.take();postMessage({hist:r.hist,traced:r.traced,key:d.key,slot:d.slot},[r.hist.buffer]);setTimeout(loop,0);})();};";
+      "onmessage=function(e){if(e.data.give){T.give(e.data.give);return;}if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen,d=e.data;"+
+      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<400)T.run(1000);"+
+      "var r=T.take();postMessage({hist:r.hist,traced:r.traced,key:d.key,slot:d.slot},[r.hist.buffer]);setTimeout(loop,100);})();};";
     try{
       var url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
       buddha.workers=[];
       for(var k=0;k<BUDDHA_WORKERS;k++){
         var wk=new Worker(url);
         wk.onmessage=function(e){
-          var sl=buddha.slots[e.data.slot];
-          if(e.data.key!==sl.key||!sl.acc||sl.acc.length!==e.data.hist.length)return;
-          var a=sl.acc,d=e.data.hist;for(var j=0;j<a.length;j++)a[j]+=d[j];
-          sl.traced+=e.data.traced;sl.dirty=true;
+          var sl=buddha.slots[e.data.slot],d=e.data.hist;
+          if(e.data.key===sl.key&&sl.acc&&sl.acc.length===d.length){
+            var a=sl.acc;for(var j=0;j<a.length;j++)a[j]+=d[j];
+            sl.traced+=e.data.traced;sl.dirty=true;
+          }
+          this.postMessage({give:d},[d.buffer]);
         };
         buddha.workers.push(wk);
       }
@@ -786,11 +797,11 @@ function buddhaStart(stage,keep){
   buddha.workers.forEach(function(wk,n){var q=Object.assign({},p);q.seed=p.seed*7919+n*104729+1;wk.postMessage(q);});
 }
 function buddhaStop(){if(buddha.workers)buddha.workers.forEach(function(w){w.postMessage({stop:true});});buddha.key="";buddha.slots.forEach(function(s){s.key="";});}
-// the summed counts go to the GPU at most ten times a second; the exposure is worked out twice a second
+// the summed counts go to the GPU at most five times a second; the exposure is worked out twice a second
 function buddhaUpload(){
   var now=performance.now();
   buddha.slots.forEach(function(sl){
-    if(!sl.dirty||!sl.acc||now-sl.up<100)return;
+    if(!sl.dirty||!sl.acc||now-sl.up<200)return;
     gl.bindTexture(gl.TEXTURE_2D,sl.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,sl.cam.w,sl.cam.h,gl.RGBA,gl.FLOAT,sl.acc);
     sl.dirty=false;sl.up=now;
@@ -1048,13 +1059,16 @@ function startRecording(){
     recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST};
   }else recJourney=null;
   recCanvas.width=recSize[0];recCanvas.height=recSize[1];rctx.fillStyle="#06030f";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
-  var stream=recCanvas.captureStream(FILM?0:60);
+  // 30 frames a second (or ?recfps=24): smooth for these slow moves, and half the encoding work of 60,
+  // which matters while the same machine is drawing the fractal
+  var recFps=Math.max(12,Math.min(60,parseInt((/[?&]recfps=(\d+)/.exec(Q)||[0,30])[1],10)||30));
+  var stream=recCanvas.captureStream(FILM?0:recFps);
   if(soundOn&&AC){
     if(!recDest){recDest=AC.createMediaStreamDestination();soundOut.connect(recDest);}
     recDest.stream.getAudioTracks().forEach(function(t){stream.addTrack(t);});
   }
   var type=recType();
-  try{recorder=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:24e6}:{});}
+  try{recorder=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:16e6}:{});}
   catch(e){recorder=new MediaRecorder(stream);}
   recChunks=[];
   var label=journey?(tour?"all":SET.id):SET.id;

@@ -41,27 +41,39 @@
 
     // master: a long, wide reverb (this is a place of echoes), glue, a limiter
     var master = gain(0), mix = gain(1), wet = gain(0.7);
-    var hp = filt("highpass", 38, 0.7), verb = ctx.createConvolver(); verb.buffer = impulse(7, 2.4);
+    // The reverb is fed in mono: a stereo input into a stereo tail makes the convolver work in "true stereo",
+    // four long convolutions at once, and that load made the sound crackle on a busy machine. Mono in, stereo
+    // out is two, and the two decorrelated channels of the tail still give the width. Its length is the main
+    // cost of the whole soundtrack, so 3.2 s with a slow fade: it still sounds long, at well under half the work.
+    var hp = filt("highpass", 38, 0.7), verb = ctx.createConvolver(); verb.normalize = true; verb.buffer = impulse(3.2, 1.6);
+    var toVerb = gain(1); toVerb.channelCount = 1; toVerb.channelCountMode = "explicit"; toVerb.channelInterpretation = "speakers";
     var comp = ctx.createDynamicsCompressor(); comp.threshold.value = -20; comp.ratio.value = 3;
     var limit = ctx.createDynamicsCompressor(); limit.threshold.value = -3; limit.ratio.value = 12; limit.attack.value = 0.005;
-    chain(mix, hp, comp); chain(hp, verb, wet, comp); chain(comp, limit, master, dest);
+    chain(mix, hp, comp); chain(hp, toVerb, verb, wet, comp); chain(comp, limit, master, dest);
 
     // a stage voice: a slow, detuned pad that breathes through a filter, and bells drawn from the chord
     function Voice(spec) { this.spec = spec; this.out = null; this.srcs = []; this.next = 0; this.step = 0; }
     Voice.prototype.wake = function () {
       if (this.out) return;
       var s = this.spec, owned = [], out = gain(0); out.connect(mix);
-      var lp = filt("lowpass", s.cutoff, 0.9); lfo(s.breathe, s.cutoff * 0.45, lp.frequency, owned);
+      // the filter breathes by updates from update() (20 a second), not an audio-rate modulator: a modulated
+      // filter frequency makes the filter recompute itself on every sample, which was most of the audio load
+      var lp = filt("lowpass", s.cutoff, 0.9); this.lp = lp; this.phase = Math.random() * 6.283;
       var pad = gain(0.9 / s.chord.length); lfo(s.breathe * 1.7, 0.3 / s.chord.length, pad.gain, owned);
       chain(pad, lp, out);
+      // notes alternate between two sides of the stereo field; the lowest three get a detuned twin for their
+      // slow shimmer (the upper ones barely show it). Half the oscillators and a third of the panners it had,
+      // so the sound engine keeps up on a busy machine
+      var sides = [-0.55, 0.55].map(function (p) {
+        var pn = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+        if (pn) { pn.pan.value = p; pn.connect(pad); return pn; } return pad;
+      });
       s.chord.forEach(function (n, i) {
-        var pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-        [-7, 7].forEach(function (cents) {
-          var o = osc(s.wave, hz(n), cents + (i % 2 ? 3 : -3)); owned.push(o);
-          var g = gain(s.wave === "triangle" ? 0.3 : 0.4);
-          if (pan) { pan.pan.value = (i / (s.chord.length - 1)) * 1.4 - 0.7; chain(o, g, pan); } else chain(o, g, pad);
+        var level = (s.wave === "triangle" ? 0.3 : 0.4) * (i < 3 ? 1 : 1.6);
+        (i < 3 ? [-7, 7] : [i % 2 ? 4 : -4]).forEach(function (cents) {
+          var o = osc(s.wave, hz(n), cents); owned.push(o);
+          chain(o, gain(level), sides[i % 2]);
         });
-        if (pan) pan.connect(pad);
       });
       // a deep root, felt more than heard
       var sub = osc("sine", hz(s.chord[0] - 12)); owned.push(sub); chain(sub, gain(0.12), out);
@@ -132,6 +144,7 @@
           if (!v.out) return;
           smooth(v.out.gain, w, now, 0.3);
           if (w > 0.2) v.bell(now, w);
+          if (v.lp) smooth(v.lp.frequency, v.spec.cutoff * (1 + 0.45 * Math.sin(v.phase + now * 6.2831853 * v.spec.breathe)), now, 0.1);
           if (w <= 0.001 && !v.quiet) v.quiet = now;
           if (w > 0.001) v.quiet = 0;
           if (v.quiet && now - v.quiet > 2) { v.sleep(now); v.quiet = 0; }
