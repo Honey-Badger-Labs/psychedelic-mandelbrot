@@ -81,14 +81,18 @@
     };
     Voice.prototype.sleep = function (now) {
       if (!this.out) return;
-      this.srcs.forEach(function (o) { try { o.stop(now + 0.05); } catch (e) {} });
-      var out = this.out; setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 300);
+      this.out.gain.cancelScheduledValues(now); this.out.gain.setValueAtTime(this.out.gain.value, now);
+      this.out.gain.linearRampToValueAtTime(0, now + 0.2);
+      this.srcs.forEach(function (o) { try { o.stop(now + 0.25); } catch (e) {} });
+      var out = this.out; setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 600);
       this.out = null; this.srcs = [];
     };
     Voice.prototype.bell = function (now, level) {
-      if (!this.out || now < this.next) return;
+      // bells are scheduled a little ahead of the audio clock. They used to be set for a moment that had usually
+      // just passed, so a busy frame skipped the slow attack and the bell jumped in: a click
+      if (!this.out || now + 0.12 < this.next) return;
       var s = this.spec, n = s.bells[(this.step * 3 + (this.step >> 2)) % s.bells.length]; this.step++;
-      var when = this.next; this.next = when + s.every * (0.75 + Math.random() * 0.5);
+      var when = Math.max(this.next, now + 0.06); this.next = when + s.every * (0.75 + Math.random() * 0.5);
       // a soft strike that rings a long time, like a singing bowl: a slow attack (no click), a faint
       // inharmonic partial, and a slight beating between two near-equal tones
       [[1, 1, 0], [1, 0.6, 1.8], [2.76, 0.12, 0]].forEach(function (p) {
@@ -124,7 +128,16 @@
       // a different fractal: a new set of stage voices (the old ones fade and stop)
       setVoices: function (names) {
         var now = ctx.currentTime;
-        voices.forEach(function (v) { if (v.out) { smooth(v.out.gain, 0, now, 0.4); (function (v) { setTimeout(function () { v.sleep(ctx.currentTime); }, 2000); })(v); } });
+        // the old voices fade on the audio clock and stop when they are truly silent (a page timer stopped them
+        // while still faintly audible, and late if the page was busy)
+        voices.forEach(function (v) {
+          if (!v.out) return;
+          v.out.gain.cancelScheduledValues(now); v.out.gain.setValueAtTime(v.out.gain.value, now);
+          v.out.gain.linearRampToValueAtTime(0, now + 2.5);
+          v.srcs.forEach(function (o) { try { o.stop(now + 2.6); } catch (e) {} });
+          var out = v.out; setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 4000);
+          v.out = null; v.srcs = [];
+        });
         voices = names.map(function (n) { return new Voice(VOICES[n] || VOICES.overview); });
         lastSpan = 0;
       },
