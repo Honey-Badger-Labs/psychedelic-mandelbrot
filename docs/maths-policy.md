@@ -4,7 +4,7 @@ The Mandelbrot set is arithmetic, so every claim this project makes can be check
 
 - **Exact**: follows from the definition by hand, and the test shows the working (the period-3 centre solves c³ + 2c² + c + 1 = 0).
 - **Computed**: found and checked numerically in double precision (a copy's centre returns to 0 after exactly its stated period and no sooner; a stated magnification matches the view).
-- **Artistic choice**: colours, palettes, glow, lighting, rotation, the route and the sound. The shapes are never altered; only how they are painted.
+- **Artistic choice**: colours, palettes, glow, lighting, shadows, rotation, the route and the sound. The shapes are never altered; only how they are painted.
 
 Rules:
 

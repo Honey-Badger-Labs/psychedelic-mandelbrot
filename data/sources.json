@@ -35,6 +35,34 @@
       "publisher": "tests/stages.test.mjs",
       "url": "tests/stages.test.mjs",
       "supports": "Each stage's stated magnification matches its span, and the deepest stays within double precision."
+    },
+    {
+      "id": "julia-check",
+      "title": "Julia constants check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "The rabbit's k is a period-3 nucleus; the whirlpool's k has a fixed point whose multiplier is a turn by the golden ratio; k = i has the stated orbit; the other constants escape after the stated number of steps."
+    },
+    {
+      "id": "ship-check",
+      "title": "Burning Ship check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "The formula the page uses; the lone ship's centre returns to 0 every 5 steps; stated magnifications match the views."
+    },
+    {
+      "id": "bulb-check",
+      "title": "Mandelbulb formula check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "The shader's step is the stated rule: radius to the power, both angles times the power, plus the start point; each stage's power and distance match its text."
+    },
+    {
+      "id": "buddha-check",
+      "title": "Buddhabrot check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "Each stage's red, green and blue iteration limits match its text."
     }
   ]
 }

@@ -1,0 +1,43 @@
+# Renders one journey to an MP4 with its soundtrack. Start it by hand from the Actions tab
+# ("Film" > "Run workflow"); the finished film appears under the run's Artifacts.
+# Frames are rendered one at a time in software, not in real time, so a full journey can take hours:
+# use "from"/"to" for one stage, or a lower "scale", for quick clips.
+name: Film
+on:
+  workflow_dispatch:
+    inputs:
+      set: { description: "mandelbrot, julia, ship, bulb or buddha", default: "mandelbrot" }
+      width: { description: "Width in pixels", default: "1920" }
+      height: { description: "Height in pixels (1080 x 1920 for a vertical clip)", default: "1080" }
+      fps: { description: "Frames per second", default: "30" }
+      from: { description: "First stage number", default: "0" }
+      to: { description: "Last stage number (blank for a full loop)", default: "" }
+      clean: { description: "No text, only the picture", type: boolean, default: false }
+      scale: { description: "Render resolution, as a fraction of the frame", default: "1" }
+jobs:
+  film:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i --no-save playwright-core@1.47.2 @fontsource/cormorant-garamond @fontsource/ibm-plex-mono
+      - run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Render
+        run: |
+          python3 -m http.server 8765 >/dev/null 2>&1 &
+          sleep 2
+          TO="${{ inputs.to }}"
+          node tools/film.mjs --set "${{ inputs.set }}" --out "psychedelic-${{ inputs.set }}.mp4" \
+            --width ${{ inputs.width }} --height ${{ inputs.height }} --fps ${{ inputs.fps }} \
+            --from ${{ inputs.from }} ${TO:+--to $TO} --scale ${{ inputs.scale }} \
+            ${{ inputs.clean && '--clean' || '' }} --chrome "$(which google-chrome)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psychedelic-${{ inputs.set }}-${{ inputs.width }}x${{ inputs.height }}
+          path: |
+            psychedelic-${{ inputs.set }}.mp4
+            psychedelic-${{ inputs.set }}.mp4.json
+          compression-level: 0
+          retention-days: 30

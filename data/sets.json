@@ -1,0 +1,629 @@
+{
+  "version": "2.0.0",
+  "about": "The map: the fractals you can choose, and for each one the stages of its journey. The page reads its text, labels, sources, framing and colours from here. Escape-time stages: re and im are the centre of the view, span its height in the complex plane, turn its rotation in degrees, iter the iteration limit at the bottom of the dive; a Julia stage adds its constant k (kre, kim). Where a stage has a period, its centre is the nucleus of a copy with that period, and tests/stages.test.mjs checks it. Mandelbulb stages: power, camera distance from the centre, yaw and pitch in degrees, field of view. Buddhabrot stages: the view, and the iteration limits for the red, green and blue counts. Colours (palette, flow, density, glow), routes and sounds are artistic choices.",
+  "sets": [
+    {
+      "id": "mandelbrot",
+      "name": "Mandelbrot",
+      "kind": "escape",
+      "formula": "mandelbrot",
+      "stages": [
+        {
+          "id": "whole",
+          "stage": 0,
+          "tick": "Whole",
+          "title": "The whole set",
+          "label": "exact",
+          "re": -0.62,
+          "im": 0,
+          "span": 3.0,
+          "turn": 0,
+          "iter": 300,
+          "palette": "prism",
+          "flow": 0.04,
+          "density": 0.35,
+          "glow": 0.5,
+          "sound": "overview",
+          "place": "z → z² + c, starting from z = 0",
+          "scale": "the whole set, 3 units tall",
+          "note": "Each point c either flings 0 off to infinity or holds it close forever. The points that hold are black. Every colour outside counts how quickly a point lets go.",
+          "sources": [
+            "definition"
+          ],
+          "pace": 1
+        },
+        {
+          "id": "seahorse",
+          "stage": 1,
+          "tick": "Seahorse",
+          "title": "Seahorse Valley",
+          "label": "computed",
+          "re": -0.743643887037151,
+          "im": 0.13182590420533,
+          "span": 3e-09,
+          "turn": 40,
+          "iter": 3000,
+          "palette": "ultraviolet",
+          "flow": 0.05,
+          "density": 0.25,
+          "glow": 0.6,
+          "sound": "seahorse",
+          "place": "c ≈ −0.7436 + 0.1318i",
+          "scale": "magnified about a billion times",
+          "note": "In the neck between the heart-shaped body and the round bulb to its left, filaments curl into seahorse tails. Each tail is made of smaller tails, as far down as we can look.",
+          "sources": [
+            "seahorse-check"
+          ],
+          "pace": 1
+        },
+        {
+          "id": "elephant",
+          "stage": 2,
+          "tick": "Elephant",
+          "title": "Elephant Valley",
+          "label": "computed",
+          "re": 0.32450475610224383,
+          "im": 0.048551058407410315,
+          "span": 3e-10,
+          "turn": -30,
+          "iter": 4000,
+          "palette": "solar",
+          "flow": 0.04,
+          "density": 0.25,
+          "glow": 0.6,
+          "sound": "elephant",
+          "place": "c ≈ 0.3245 + 0.0486i",
+          "scale": "magnified ten billion times",
+          "note": "Near the heart's cleft the filaments march in rows of trunks. At the centre sits a small copy of the whole set: start at 0 and its centre comes back to 0 every 329 steps.",
+          "sources": [
+            "nucleus-check"
+          ],
+          "period": 329,
+          "pace": 1
+        },
+        {
+          "id": "tendril",
+          "stage": 3,
+          "tick": "Tendril",
+          "title": "Along a tendril",
+          "label": "computed",
+          "re": -1.2506592094662219,
+          "im": 0.020120147680640132,
+          "span": 1.2e-08,
+          "turn": 60,
+          "iter": 4500,
+          "palette": "acid",
+          "flow": 0.06,
+          "density": 0.3,
+          "glow": 0.6,
+          "sound": "spiral",
+          "place": "c ≈ −1.2507 + 0.0201i",
+          "scale": "magnified 250 million times",
+          "note": "Off the edge of the round bulb on the left, a tendril leads to another copy. This one repeats every 395 steps, and wears a crown of copies of its own filaments.",
+          "sources": [
+            "nucleus-check"
+          ],
+          "period": 395,
+          "pace": 1
+        },
+        {
+          "id": "three",
+          "stage": 4,
+          "tick": "Period 3",
+          "title": "The first copy",
+          "label": "exact",
+          "re": -1.754877666246693,
+          "im": 0,
+          "span": 0.05,
+          "turn": 0,
+          "iter": 600,
+          "palette": "coral",
+          "flow": 0.04,
+          "density": 0.35,
+          "glow": 0.5,
+          "sound": "tendril",
+          "place": "c ≈ −1.7549 on the real line",
+          "scale": "magnified 60 times",
+          "note": "Out on the spike to the left lies the largest copy on the line. Its centre solves c³ + 2c² + c + 1 = 0: start at 0, and three steps later you are back at 0.",
+          "sources": [
+            "period3-check"
+          ],
+          "period": 3,
+          "pace": 1
+        },
+        {
+          "id": "antenna",
+          "stage": 5,
+          "tick": "Antenna",
+          "title": "Down the antenna",
+          "label": "computed",
+          "re": -1.7687788188250524,
+          "im": -0.001738990598137903,
+          "span": 1.5e-10,
+          "turn": 90,
+          "iter": 3000,
+          "palette": "ice",
+          "flow": 0.05,
+          "density": 0.25,
+          "glow": 0.6,
+          "sound": "minibrot",
+          "place": "c ≈ −1.7688 − 0.0017i",
+          "scale": "magnified 20 billion times",
+          "note": "Further down the same spike, a copy that repeats every 113 steps. Snowflake arms radiate from it, and each arm is a chain of smaller copies.",
+          "sources": [
+            "nucleus-check"
+          ],
+          "period": 113,
+          "pace": 1
+        },
+        {
+          "id": "spirals",
+          "stage": 6,
+          "tick": "Spirals",
+          "title": "Double spirals",
+          "label": "computed",
+          "re": -0.23512496168106764,
+          "im": 0.8272153015753011,
+          "span": 1.5e-08,
+          "turn": -45,
+          "iter": 3500,
+          "palette": "sherbet",
+          "flow": 0.05,
+          "density": 0.25,
+          "glow": 0.6,
+          "sound": "star",
+          "place": "c ≈ −0.2351 + 0.8272i",
+          "scale": "magnified 200 million times",
+          "note": "High on the top of the body, filaments braid into lace around a copy that repeats every 228 steps. The colours are chosen; the shapes are only arithmetic.",
+          "sources": [
+            "nucleus-check"
+          ],
+          "period": 228,
+          "pace": 1
+        },
+        {
+          "id": "deep",
+          "stage": 7,
+          "tick": "Deepest",
+          "title": "The set, again",
+          "label": "computed",
+          "re": -0.7746806106268826,
+          "im": -0.13741688560382176,
+          "span": 8e-13,
+          "turn": 120,
+          "iter": 5000,
+          "palette": "aurora",
+          "flow": 0.04,
+          "density": 0.22,
+          "glow": 0.6,
+          "sound": "abyss",
+          "place": "c ≈ −0.7747 − 0.1374i",
+          "scale": "magnified nearly 4 trillion times",
+          "note": "The deepest dive: almost four trillion times closer, in the mirror image of Seahorse Valley. At the bottom, the whole set again, small, whole, repeating every 116 steps.",
+          "sources": [
+            "nucleus-check",
+            "precision"
+          ],
+          "period": 116,
+          "pace": 1
+        }
+      ]
+    },
+    {
+      "id": "julia",
+      "name": "Julia",
+      "kind": "escape",
+      "formula": "julia",
+      "stages": [
+        {
+          "id": "rabbit",
+          "stage": 0,
+          "tick": "Rabbit",
+          "title": "The rabbit",
+          "place": "k ≈ −0.1226 + 0.7449i",
+          "scale": "the whole Julia set",
+          "note": "Fix k, then colour each starting z by how fast z → z² + k escapes. This k is the centre of the period-3 bulb atop the Mandelbrot set: 0 returns to 0 every 3 steps.",
+          "sources": [
+            "julia-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": 0,
+          "im": 0,
+          "span": 3.0,
+          "turn": 0,
+          "iter": 600,
+          "kre": -0.12256116687665361,
+          "kim": 0.7448617666197442,
+          "palette": "candy",
+          "flow": 0.05,
+          "density": 0.45,
+          "glow": 0.6,
+          "sound": "overview",
+          "period": 3
+        },
+        {
+          "id": "siegel",
+          "stage": 1,
+          "tick": "Siegel",
+          "title": "A golden whirlpool",
+          "place": "k ≈ −0.3905 − 0.5868i",
+          "scale": "magnified 3 times",
+          "note": "Here k makes one fixed point turn everything near it by the golden ratio of a full turn, every step. Around it the set curls into whirlpools that never quite close.",
+          "sources": [
+            "julia-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": -0.369,
+          "im": -0.338,
+          "span": 1.0,
+          "turn": 0,
+          "iter": 3000,
+          "kre": -0.3905408702184,
+          "kim": -0.5867879073469687,
+          "palette": "aurora",
+          "flow": 0.05,
+          "density": 0.3,
+          "glow": 0.6,
+          "sound": "spiral"
+        },
+        {
+          "id": "dendrite",
+          "stage": 2,
+          "tick": "Dendrite",
+          "title": "Lightning",
+          "place": "k = i",
+          "scale": "the whole Julia set",
+          "note": "With k = i, 0 goes to i, −1 + i, −i, −1 + i, −i… and never settles or escapes. This Julia set has no black inside at all: only branches, like lightning.",
+          "sources": [
+            "julia-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": 0,
+          "im": 0,
+          "span": 2.6,
+          "turn": 90,
+          "iter": 800,
+          "kre": 0,
+          "kim": 1,
+          "palette": "ultraviolet",
+          "flow": 0.05,
+          "density": 0.4,
+          "glow": 0.7,
+          "sound": "tendril"
+        },
+        {
+          "id": "seahorses",
+          "stage": 3,
+          "tick": "Spirals",
+          "title": "Seahorse spirals",
+          "place": "k ≈ −0.7269 + 0.1889i",
+          "scale": "magnified 60 times",
+          "note": "This k sits just outside the Mandelbrot set near Seahorse Valley: 0 escapes after 431 steps. Its Julia set borrows the valley's spirals, and curls them everywhere.",
+          "sources": [
+            "julia-check"
+          ],
+          "label": "computed",
+          "pace": 1,
+          "re": 0.0,
+          "im": 0.0,
+          "span": 0.05,
+          "turn": 0,
+          "iter": 2000,
+          "kre": -0.7269,
+          "kim": 0.1889,
+          "palette": "sherbet",
+          "flow": 0.05,
+          "density": 0.3,
+          "glow": 0.6,
+          "sound": "seahorse",
+          "escapes": 431
+        },
+        {
+          "id": "dust",
+          "stage": 4,
+          "tick": "Dust",
+          "title": "Dust",
+          "place": "k ≈ −0.8 + 0.156i",
+          "scale": "the whole Julia set",
+          "note": "Another k just outside: 0 escapes after 252 steps. The spirals hang together by the thinnest threads.",
+          "sources": [
+            "julia-check"
+          ],
+          "label": "computed",
+          "pace": 1,
+          "re": 0,
+          "im": 0,
+          "span": 2.8,
+          "turn": 0,
+          "iter": 400,
+          "kre": -0.8,
+          "kim": 0.156,
+          "palette": "acid",
+          "flow": 0.05,
+          "density": 0.4,
+          "glow": 0.6,
+          "sound": "star",
+          "escapes": 252
+        }
+      ]
+    },
+    {
+      "id": "ship",
+      "name": "Burning Ship",
+      "kind": "escape",
+      "formula": "ship",
+      "stages": [
+        {
+          "id": "ship",
+          "stage": 0,
+          "tick": "Ship",
+          "title": "The Burning Ship",
+          "place": "z → (|Re z| + i|Im z|)² + c",
+          "scale": "the whole set, 2.6 units tall",
+          "note": "The Mandelbrot formula with one change: before squaring, make both parts of z positive. That fold breaks the symmetry, and the set grows hulls and masts.",
+          "sources": [
+            "ship-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": -0.45,
+          "im": -0.55,
+          "span": 2.6,
+          "turn": 0,
+          "iter": 400,
+          "palette": "fire",
+          "flow": 0.04,
+          "density": 0.35,
+          "glow": 0.5,
+          "sound": "spiral"
+        },
+        {
+          "stage": 1,
+          "pace": 1,
+          "id": "lone",
+          "tick": "Lone ship",
+          "title": "A lone ship",
+          "label": "computed",
+          "re": -1.8607825222048548,
+          "im": -0.002,
+          "span": 0.012,
+          "turn": 0,
+          "iter": 1200,
+          "palette": "ember",
+          "flow": 0.04,
+          "density": 0.3,
+          "glow": 0.6,
+          "sound": "elephant",
+          "nucleus": [
+            -1.8607825222048548,
+            0
+          ],
+          "period": 5,
+          "sources": [
+            "ship-check"
+          ],
+          "place": "c ≈ −1.8608 on the real line",
+          "scale": "magnified 200 times",
+          "note": "Far out on the long antenna sits a small ship. Its keel is on the real line, and from 0 its centre comes back to 0 every 5 steps."
+        },
+        {
+          "stage": 2,
+          "pace": 1,
+          "id": "cathedral",
+          "tick": "Cathedral",
+          "title": "The cathedral",
+          "label": "computed",
+          "re": -1.8607825222048548,
+          "im": -0.0016,
+          "span": 0.0012,
+          "turn": 0,
+          "iter": 1500,
+          "palette": "gothic",
+          "flow": 0.04,
+          "density": 0.3,
+          "glow": 0.7,
+          "sound": "minibrot",
+          "sources": [
+            "ship-check"
+          ],
+          "place": "c ≈ −1.8608 − 0.0016i",
+          "scale": "magnified 2,000 times",
+          "note": "Just above that ship its rigging rises into vaults and spires. No one drew them: every arch is the same folded squaring, repeated up to 1,500 times."
+        },
+        {
+          "stage": 3,
+          "pace": 1,
+          "id": "armada",
+          "tick": "Armada",
+          "title": "The armada",
+          "label": "computed",
+          "re": -1.7755,
+          "im": -0.034,
+          "span": 0.012,
+          "turn": 0,
+          "iter": 1500,
+          "palette": "ice",
+          "flow": 0.04,
+          "density": 0.3,
+          "glow": 0.6,
+          "sound": "abyss",
+          "sources": [
+            "ship-check"
+          ],
+          "place": "c ≈ −1.7755 − 0.0340i",
+          "scale": "magnified 200 times",
+          "note": "A little further in along the antenna, dark sails in rows. Dark means the orbit of 0 never escaped within the 1,500-step limit."
+        }
+      ]
+    },
+    {
+      "id": "bulb",
+      "name": "Mandelbulb",
+      "kind": "bulb",
+      "stages": [
+        {
+          "id": "bulb",
+          "stage": 0,
+          "tick": "Bulb",
+          "title": "The Mandelbulb",
+          "place": "power 8",
+          "scale": "seen from 2.6 units away",
+          "note": "A 3D cousin. Write a point in spherical coordinates, raise its distance to the 8th power, multiply both angles by 8, add the start point, repeat. Points that stay close make this shape.",
+          "sources": [
+            "bulb-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "power": 8,
+          "dist": 2.6,
+          "yaw": 30,
+          "pitch": 20,
+          "fov": 1.4,
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "palette": "nebula",
+          "flow": 0.04,
+          "density": 0.5,
+          "glow": 0.6,
+          "sound": "abyss",
+          "re": 0,
+          "im": 0,
+          "span": 2.6
+        },
+        {
+          "id": "close",
+          "stage": 1,
+          "tick": "Close",
+          "title": "Coastline",
+          "place": "power 8",
+          "scale": "1.5 units from the centre",
+          "note": "Closer in, the surface folds into terraces and coastlines. The shape is arithmetic; the light, the shadows in its crevices and the colours are choices.",
+          "sources": [
+            "bulb-check"
+          ],
+          "label": "art",
+          "pace": 1,
+          "power": 8,
+          "dist": 1.5,
+          "yaw": 80,
+          "pitch": 45,
+          "fov": 1.2,
+          "at": [
+            0,
+            0,
+            0.2
+          ],
+          "palette": "coral",
+          "flow": 0.04,
+          "density": 0.5,
+          "glow": 0.6,
+          "sound": "tendril",
+          "re": 0,
+          "im": 0,
+          "span": 1.5
+        },
+        {
+          "id": "p4",
+          "stage": 2,
+          "tick": "Power 4",
+          "title": "Power four",
+          "place": "power 4",
+          "scale": "seen from 2.5 units away",
+          "note": "Lower the power to 4 and the same rule grows fewer, fatter lobes. Between stages the power changes smoothly, so one shape melts into the next.",
+          "sources": [
+            "bulb-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "power": 4,
+          "dist": 2.5,
+          "yaw": 140,
+          "pitch": 10,
+          "fov": 1.4,
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "palette": "jade",
+          "flow": 0.04,
+          "density": 0.5,
+          "glow": 0.6,
+          "sound": "overview",
+          "re": 0,
+          "im": 0,
+          "span": 2.5
+        }
+      ]
+    },
+    {
+      "id": "buddha",
+      "name": "Buddhabrot",
+      "kind": "buddha",
+      "stages": [
+        {
+          "id": "buddha",
+          "stage": 0,
+          "tick": "Buddha",
+          "title": "The Buddhabrot",
+          "place": "paths of escaping points",
+          "scale": "c from −2.15 to 1.05",
+          "note": "Pick random c outside the set, follow 0 under z → z² + c until it escapes, and brighten every pixel its path crosses. Red counts paths up to 5,000 steps, green 500, blue 50.",
+          "sources": [
+            "buddha-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": -0.4,
+          "im": 0,
+          "span": 3.0,
+          "turn": 90,
+          "limits": [
+            5000,
+            500,
+            50
+          ],
+          "palette": "nebula",
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "sound": "abyss"
+        },
+        {
+          "id": "deep",
+          "stage": 1,
+          "tick": "Deep",
+          "title": "Slow escapers",
+          "place": "long paths only",
+          "scale": "c from −2.15 to 1.05",
+          "note": "Now red counts paths up to 20,000 steps, green 2,000, blue 200. The slow escapers start close to the set's edge, and their paths draw finer lace.",
+          "sources": [
+            "buddha-check"
+          ],
+          "label": "exact",
+          "pace": 1,
+          "re": -0.4,
+          "im": 0,
+          "span": 3.0,
+          "turn": 90,
+          "limits": [
+            20000,
+            2000,
+            200
+          ],
+          "palette": "prism",
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "sound": "minibrot"
+        }
+      ]
+    }
+  ]
+}

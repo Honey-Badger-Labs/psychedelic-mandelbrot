@@ -106,6 +106,13 @@
 
     var LEVEL = 0.75, lastUpdate = -1, lastSpan = 0;
     return {
+      // a different fractal: a new set of stage voices (the old ones fade and stop)
+      setVoices: function (names) {
+        var now = ctx.currentTime;
+        voices.forEach(function (v) { if (v.out) { smooth(v.out.gain, 0, now, 0.4); (function (v) { setTimeout(function () { v.sleep(ctx.currentTime); }, 2000); })(v); } });
+        voices = names.map(function (n) { return new Voice(VOICES[n] || VOICES.overview); });
+        lastSpan = 0;
+      },
       setOn: function (on, seconds) { smooth(master.gain, on ? LEVEL : 0, ctx.currentTime, (seconds || 1.6) / 4); },
       // call every frame with the journey position and the camera
       update: function (T, C) {
