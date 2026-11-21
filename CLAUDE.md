@@ -8,3 +8,4 @@
 - Pass 1 (`FS_ITER`) runs only when the camera moves; pass 2 (`FS_COL`) runs every frame. Keep animation that does not change the geometry in pass 2.
 - New copies: `node tools/locate.mjs <re> <im>`; the test checks the true period (it divides the one the atom-domain search reports).
 - To look at a stage, serve the folder (`npm run serve`) and screenshot `?at=<T>&scale=1&still` in headless Chrome with SwiftShader; `file://` cannot load the map.
+- Also published as a claude.ai artifact (https://claude.ai/artifact/2995zK43Qkazd4zdbMe5hS). Republish `index.html` with `audio.js`, `data/*.json` and `tests/stages.test.mjs` together. It is private (owner only).
