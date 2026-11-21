@@ -284,10 +284,34 @@ precision highp float;
 uniform highp sampler2D uData;
 uniform float uTime, uFlow, uDensity, uLight, uGlow;
 uniform vec2 uRes;
+// where each screen pixel lies in the last finished picture, which was computed for a slightly different
+// camera: data = uM * (pixel - centre) + uOff + dataSize/2. uDist converts its distances to screen pixels
+uniform mat2 uM;
+uniform vec2 uOff, uDataSize;
+uniform float uLiftPx, uDist;
 out vec4 o;
 `+GLSL_PAL+`
+vec4 fetch(ivec2 i){return texelFetch(uData,clamp(i,ivec2(0),ivec2(uDataSize)-1),0);}
+// bilinear by hand: float data cannot be filtered everywhere, and inside and outside must not be blended
+vec4 sampleData(vec2 q){
+  vec2 x=q-.5, f=fract(x); ivec2 i=ivec2(floor(x));
+  vec4 t[4]; float w[4];
+  t[0]=fetch(i);t[1]=fetch(i+ivec2(1,0));t[2]=fetch(i+ivec2(0,1));t[3]=fetch(i+ivec2(1,1));
+  w[0]=(1.-f.x)*(1.-f.y);w[1]=f.x*(1.-f.y);w[2]=(1.-f.x)*f.y;w[3]=f.x*f.y;
+  int nb=0; for(int k=1;k<4;k++)if(w[k]>w[nb])nb=k;
+  vec4 nearest=t[0];for(int k=1;k<4;k++)if(k==nb)nearest=t[k];
+  if(nearest.x<0.)return nearest;
+  float sw=0.,mu=0.,st=0.,di=0.; vec2 nv=vec2(0);
+  for(int k=0;k<4;k++){
+    if(t[k].x<0.)continue;
+    sw+=w[k];mu+=w[k]*t[k].x;st+=w[k]*t[k].y;di+=w[k]*t[k].z;nv+=w[k]*vec2(cos(t[k].w),sin(t[k].w));
+  }
+  return vec4(mu/sw,st/sw,di/sw,nearest.w>8.?9.:atan(nv.y,nv.x));
+}
 void main(){
-  vec4 d=texelFetch(uData,ivec2(gl_FragCoord.xy),0);
+  vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
+  vec4 d=sampleData(uM*fd+uOff+.5*uDataSize);
+  d.z*=uDist;
   vec3 col;
   if(d.x<0.){
     // inside: near-black, lit faintly by how close the orbit came to the centre
@@ -375,20 +399,38 @@ void main(){
 // here. Three counts, for three iteration limits, each painted with its own colour from the palette.
 var FS_BUDDHA=`#version 300 es
 precision highp float;
-uniform highp sampler2D uHist;
-uniform vec2 uRes, uHistSize;
-uniform vec3 uNorm;            // 1 / a high percentile of each count, so the picture keeps its exposure as it fills
-uniform float uTime, uFlow, uFade, uGlow;
+// two exposures: the view we are leaving (A) and the one developing (B), each traced for its own camera and
+// moved, scaled and turned here to the camera of this frame, so a change of view is a zoom, not a cut
+uniform highp sampler2D uHistA, uHistB;
+uniform mat2 uMA, uMB;
+uniform vec2 uOffA, uOffB, uSizeA, uSizeB, uRes;
+uniform vec3 uNormA, uNormB;   // 1 / a high percentile of each count, so a picture keeps its exposure as it fills
+uniform float uWA, uWB, uLiftPx, uTime, uFlow, uGlow;
 out vec4 o;
 `+GLSL_PAL+`
-void main(){
-  vec2 hp=gl_FragCoord.xy*uHistSize/uRes;
-  vec3 h=texelFetch(uHist,ivec2(hp),0).rgb;
-  vec3 v=clamp(pow(h*uNorm,vec3(.6)),0.,1.2);
+vec3 counts(highp sampler2D h,vec2 q,vec2 size){
+  // bilinear by hand (float textures cannot always be filtered), so a magnified exposure stays smooth
+  vec2 x=q-.5,f=fract(x); ivec2 i=ivec2(floor(x)),m=ivec2(size)-1;
+  // soft edges, so the end of a traced window never shows as a line
+  vec2 edge=min(q,size-q)/(.06*size);
+  float soft=smoothstep(0.,1.,clamp(min(edge.x,edge.y),0.,1.));
+  if(soft<=0.)return vec3(0);
+  vec3 a=texelFetch(h,clamp(i,ivec2(0),m),0).rgb,b=texelFetch(h,clamp(i+ivec2(1,0),ivec2(0),m),0).rgb;
+  vec3 c=texelFetch(h,clamp(i+ivec2(0,1),ivec2(0),m),0).rgb,d=texelFetch(h,clamp(i+ivec2(1,1),ivec2(0),m),0).rgb;
+  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y)*soft;
+}
+vec3 paint(vec3 h,vec3 norm){
+  vec3 v=clamp(pow(h*norm,vec3(.6)),0.,1.2);
   float t=-uTime*uFlow;
   vec3 col=v.r*palette(t)+v.g*palette(t+.33)*.9+v.b*palette(t+.66)*.8;
-  col+=pow(v.r*v.g*v.b,1.5)*uGlow*.6;
-  col=col*uFade+vec3(.008,.004,.02);
+  return col+pow(v.r*v.g*v.b,1.5)*uGlow*.6;
+}
+void main(){
+  vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
+  vec3 col=vec3(0);
+  if(uWA>0.)col+=paint(counts(uHistA,uMA*fd+uOffA,uSizeA),uNormA)*uWA;
+  if(uWB>0.)col+=paint(counts(uHistB,uMB*fd+uOffB,uSizeB),uNormB)*uWB;
+  col+=vec3(.008,.004,.02);
   o=vec4(finish(col,gl_FragCoord.xy,uRes),1.);
 }`;
 
@@ -447,15 +489,25 @@ function referenceOrbit(formula,cr,ci,kr,ki,maxIter){
 }
 
 // the data target pass 1 writes and pass 2 reads
-var dataTex=gl.createTexture(),fbo=gl.createFramebuffer(),W=0,H=0;
+// Smooth motion. Computing a deep view takes a slow GPU several frames' worth of time, which used to show as a
+// stutter. Instead the view is computed in strips, a few per frame, for where the camera will be when it is done,
+// while every frame shows the last finished view moved, scaled and turned to where the camera is now.
+var MARGIN=1.2,W=0,H=0,DW=0,DH=0;
+var targets=[0,1].map(function(){return {tex:gl.createTexture(),fbo:gl.createFramebuffer()};});
+var front={t:targets[0],cam:null},back={t:targets[1],cam:null,active:false,strip:0,strips:1,len:0};
+var strips=1,stripTimer=0;
 function sizeTargets(w,h){
   W=w;H=h;canvas.width=w;canvas.height=h;
-  gl.bindTexture(gl.TEXTURE_2D,dataTex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,null);
-  nearest();
-  gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,dataTex,0);
+  DW=Math.ceil(w*MARGIN);DH=Math.ceil(h*MARGIN);
+  targets.forEach(function(t){
+    gl.bindTexture(gl.TEXTURE_2D,t.tex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,DW,DH,0,gl.RGBA,gl.FLOAT,null);
+    nearest();
+    gl.bindFramebuffer(gl.FRAMEBUFFER,t.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t.tex,0);
+  });
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  front.cam=null;back.active=false;
 }
 
 // render resolution. Auto adapts to the GPU, but only while the view rests or between stages: changing
@@ -566,12 +618,16 @@ function camAt(T){
     C.at=[0,1,2].map(function(i){return lerp((A.at||[0,0,0])[i],(B.at||[0,0,0])[i],e);});
     C.span=C.dist;
   }else{
-    // the Buddhabrot fades out, starts tracing the next view from nothing, and fades back in as it fills
-    C.stage=fr<.5?k%n:(k+1)%n;
-    var S=STAGES[C.stage];
-    C.re=S.re;C.im=S.im;C.span=S.span;C.rot=S.turn*Math.PI/180;C.limits=S.limits;
-    C.fade=fr<=0?1:fr<.5?Math.pow(Math.cos(Math.PI*fr),2):Math.pow(Math.sin(Math.PI*(fr-.5)),2);
-    C.mix=fr<.5?0:1;
+    // the Buddhabrot zooms from one view to the next: the old exposure is carried along and fades, while the
+    // next view starts developing at once and fades in as it fills
+    var e=fr<=0?0:glide(fr,RAMP/g.secs);
+    var la=Math.log(A.span),lb=Math.log(B.span),Ls=la+(lb-la)*e,sp=Math.exp(Ls);
+    // pan in step with the zoom, so the point we are heading for moves steadily across the screen
+    var w=Math.abs(A.span-B.span)>1e-9?(A.span-sp)/(A.span-B.span):e;
+    C.re=lerp(A.re,B.re,w);C.im=lerp(A.im,B.im,w);C.span=sp;C.rot=lerpAngle(A.turn,B.turn,e)*Math.PI/180;
+    C.stageA=k%n;C.stageB=(k+1)%n;C.stage=fr>0?C.stageB:C.stageA;C.limits=STAGES[C.stage].limits;
+    C.wA=fr<=0?1:1-smoother((fr-.3)/.6);C.wB=fr<=0?0:smoother((fr-.08)/.7);
+    C.mix=e;
   }
   C.flow=lerp(A.flow,B.flow,C.mix);C.density=lerp(A.density,B.density,C.mix);C.glow=lerp(A.glow,B.glow,C.mix);
   return C;
@@ -586,22 +642,29 @@ function buddhaTracer(){
   function rnd(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;}
   function start(p){
     st=p;seed=p.seed||12345;st.hist=new Float32Array(p.w*p.h*4);st.traced=0;
+    // a small window: most random paths never cross it, so paths that did are tried again with small changes
+    st.zoom=p.span<2.4;st.seeds=[];st.mut=.004*p.span;
     var L=Math.max(p.limits[0],p.limits[1],p.limits[2]);st.minK=p.limits[3]||12;st.ox=new Float64Array(L+1);st.oy=new Float64Array(L+1);st.L=L;
   }
   function plot(x,y,k){
     var dx=x-st.re,dy=y-st.im,u=(dx*st.cos+dy*st.sin)/st.pix,v=(-dx*st.sin+dy*st.cos)/st.pix;
     var px=Math.floor(st.w/2+u),py=Math.floor(st.h/2+v+st.lift);
-    if(px<0||py<0||px>=st.w||py>=st.h)return;
+    if(px<0||py<0||px>=st.w||py>=st.h)return 0;
     var i=(py*st.w+px)*4,l=st.limits;
     if(k<=l[0])st.hist[i]++;
     if(k<=l[1])st.hist[i+1]++;
     if(k<=l[2])st.hist[i+2]++;
+    return 1;
   }
   function run(samples){
     if(!st)return;
     var ox=st.ox,oy=st.oy,L=st.L;
     for(var s=0;s<samples;s++){
-      var cr=rnd()*3.2-2.15,ci=rnd()*3.2-1.6;
+      var cr,ci,fromSeed=st.zoom&&st.seeds.length>20&&rnd()<.5;
+      if(fromSeed){
+        var sd=st.seeds[(rnd()*st.seeds.length)|0],r=st.mut*Math.pow(10,-2.5*rnd()),a=rnd()*6.2831853;
+        cr=sd[0]+r*Math.cos(a);ci=sd[1]+r*Math.sin(a);
+      }else{cr=rnd()*3.2-2.15;ci=rnd()*3.2-1.6;}
       // skip the two largest regions inside the set: their orbits never escape
       var q=(cr-.25)*(cr-.25)+ci*ci;
       if(q*(q+(cr-.25))<.25*ci*ci||(cr+1)*(cr+1)+ci*ci<.0625)continue;
@@ -613,7 +676,9 @@ function buddhaTracer(){
       if(!esc||k<st.minK)continue;
       st.traced++;
       // the mirror image is a valid path too (c's conjugate traces it), so each orbit is drawn twice
-      for(var j=2;j<k;j++){plot(ox[j],oy[j],k);plot(ox[j],-oy[j],k);}
+      var hits=0;
+      for(var j=2;j<k;j++){hits+=plot(ox[j],oy[j],k);hits+=plot(ox[j],-oy[j],k);}
+      if(st.zoom&&hits){if(st.seeds.length<4000)st.seeds.push([cr,ci]);else st.seeds[(rnd()*4000)|0]=[cr,ci];}
     }
   }
   function levels(){
@@ -629,42 +694,51 @@ function buddhaTracer(){
   }
   return {start:start,run:run,levels:levels,state:function(){return st;}};
 }
-var buddha={tex:gl.createTexture(),w:0,h:0,key:"",levels:[1,1,1],traced:0,worker:null,local:null,shown:0};
-gl.bindTexture(gl.TEXTURE_2D,buddha.tex);nearest();
+// two exposures: slot 0 and 1 hold a stage's histogram each; the tracer fills one at a time
+var buddha={slots:[0,1].map(function(){var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);nearest();return {tex:t,key:"",cam:null,levels:[1,1,1],traced:0};}),
+  tracing:-1,key:"",worker:null,local:null};
 var FILM=/[?&]film/.test(Q);
-function buddhaStart(C){
-  var w=Math.max(64,Math.round(W)),h=Math.max(64,Math.round(H));
-  var p={w:w,h:h,re:C.re,im:C.im,pix:C.span/Math.min(w,h),cos:Math.cos(C.rot),sin:Math.sin(C.rot),limits:C.limits,lift:lift*h,seed:7+C.stage};
-  buddha.w=w;buddha.h=h;buddha.levels=[1,1,1];buddha.traced=0;
-  gl.bindTexture(gl.TEXTURE_2D,buddha.tex);
+function buddhaKey(st){return [SET.id,st,W,H,lift].join(",");}
+function slotFor(key){for(var i=0;i<2;i++)if(buddha.slots[i].key===key)return buddha.slots[i];return null;}
+function buddhaStart(stage,keep){
+  var S=STAGES[stage],key=buddhaKey(stage);
+  // reuse the slot not showing the view we are leaving
+  var i=buddha.slots[0].key===keep?1:0,slot=buddha.slots[i];
+  // traced a little wider than the view, so the zoom towards it has picture at the edges
+  var w=Math.max(64,Math.round(W*1.35)),h=Math.max(64,Math.round(H*1.35)),rot=S.turn*Math.PI/180;
+  var p={w:w,h:h,re:S.re,im:S.im,span:S.span,pix:S.span/Math.max(1,Math.min(W,H)),cos:Math.cos(rot),sin:Math.sin(rot),limits:S.limits,lift:lift*H,seed:7+stage,key:key,slot:i};
+  slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:p.pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1];slot.traced=0;
+  gl.bindTexture(gl.TEXTURE_2D,slot.tex);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,new Float32Array(w*h*4));
+  buddha.key=key;buddha.tracing=i;
   if(FILM||!window.Worker){buddha.local=buddha.local||buddhaTracer();buddha.local.start(p);return;}
   if(!buddha.worker){
-    var src="var T=("+buddhaTracer.toString()+")();var busy=false,gen=0;"+
-      "onmessage=function(e){if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen;"+
-      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<220)T.run(4000);"+
-      "var s=T.state();postMessage({hist:s.hist.slice(),levels:T.levels(),traced:s.traced,key:e.data.key});setTimeout(loop,0);})();};";
+    var src="var T=("+buddhaTracer.toString()+")();var gen=0;"+
+      "onmessage=function(e){if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen,d=e.data;"+
+      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<200)T.run(3000);"+
+      "var s=T.state();postMessage({hist:s.hist.slice(),levels:T.levels(),traced:s.traced,key:d.key,slot:d.slot});setTimeout(loop,0);})();};";
     try{buddha.worker=new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));}
     catch(e){buddha.worker=null;buddha.local=buddhaTracer();buddha.local.start(p);return;}
     buddha.worker.onmessage=function(e){
-      if(e.data.key!==buddha.key)return;
-      gl.bindTexture(gl.TEXTURE_2D,buddha.tex);
-      gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,buddha.w,buddha.h,gl.RGBA,gl.FLOAT,e.data.hist);
-      buddha.levels=e.data.levels;buddha.traced=e.data.traced;
+      var slot=buddha.slots[e.data.slot];
+      if(e.data.key!==slot.key||e.data.key!==buddha.key)return;
+      gl.bindTexture(gl.TEXTURE_2D,slot.tex);
+      gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,slot.cam.w,slot.cam.h,gl.RGBA,gl.FLOAT,e.data.hist);
+      slot.levels=e.data.levels;slot.traced=e.data.traced;
     };
   }
-  p.key=buddha.key;buddha.worker.postMessage(p);
+  buddha.worker.postMessage(p);
 }
-function buddhaStop(){if(buddha.worker)buddha.worker.postMessage({stop:true});buddha.key="";}
+function buddhaStop(){if(buddha.worker)buddha.worker.postMessage({stop:true});buddha.key="";buddha.slots.forEach(function(s){s.key="";});}
 function buddhaLocalStep(){
-  if(!buddha.local||!buddha.local.state())return;
-  buddha.local.run(FILM?24000:6000);
-  var s=buddha.local.state();
+  if(!buddha.local||!buddha.local.state()||buddha.tracing<0)return;
+  buddha.local.run(FILM?24000:5000);
   buddha.frames=(buddha.frames||0)+1;
   if(buddha.frames%4)return;
-  gl.bindTexture(gl.TEXTURE_2D,buddha.tex);
-  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,buddha.w,buddha.h,gl.RGBA,gl.FLOAT,s.hist);
-  buddha.levels=buddha.local.levels();buddha.traced=s.traced;
+  var s=buddha.local.state(),slot=buddha.slots[buddha.tracing];
+  gl.bindTexture(gl.TEXTURE_2D,slot.tex);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,slot.cam.w,slot.cam.h,gl.RGBA,gl.FLOAT,s.hist);
+  slot.levels=buddha.local.levels();slot.traced=s.traced;
 }
 
 // =====================================================================================================
@@ -916,9 +990,9 @@ function useSet(id,stageAt){
 // =====================================================================================================
 // Drawing
 // =====================================================================================================
-var dirty=true,lastKey="",time=0,clockFrozen=/[?&]still/.test(Q);
+var dirty=true,time=0,clockFrozen=/[?&]still/.test(Q);
 var magEl=document.getElementById("mag"),itEl=document.getElementById("iters"),whereEl=document.getElementById("where");
-var lightA=.7,frameMs=16,slowFor=0,fastFor=0;
+var lightA=.7,frameMs=16,slowFor=0,fastFor=0,tRate=0;
 function adaptResolution(dt,moving){
   if(SCALES[qi]||FIXED||recorder||FILM)return;
   // judged over a couple of seconds, and applied only while the view rests or between stages
@@ -928,6 +1002,42 @@ function adaptResolution(dt,moving){
   if(slowFor>1.5){autoScale=Math.max(.3,autoScale*.85);slowFor=0;}
   else if(fastFor>3){autoScale=Math.min(coarse?.75:1,autoScale*1.1);fastFor=0;}
 }
+function camKey(C){return [SET.id,C.re,C.im,C.span,C.rot,C.iter,C.kr,C.ki,W,H,lift].join(",");}
+// where the camera will be after n more frames at the current pace (never past the stage it is heading for)
+function predicted(C,n){
+  if(!tRate||FILM)return C;
+  var k=Math.floor(T+1e-9),t=Math.min(k+1,T+tRate*n*frameMs/1000);
+  var P=camAt(t);return P;
+}
+function escapeCompute(C){
+  // how many strips: as few as the GPU allows while keeping frames quick
+  if(!FILM){
+    stripTimer+=frameMs/1000;
+    if(stripTimer>.3){stripTimer=0;if(frameMs>21&&strips<16)strips++;else if(frameMs<15&&strips>1)strips--;}
+  }else strips=1;
+  if(!back.active&&(dirty||!front.cam||front.cam.key!==camKey(C))){
+    var target=front.cam?predicted(C,strips+1):C;
+    target.key=camKey(C)===camKey(target)?camKey(C):camKey(target);
+    target.W=W;target.H=H;target.lift=lift*H;
+    back.cam=target;back.len=referenceOrbit(target.formula,target.re,target.im,target.kr,target.ki,target.iter);
+    back.strip=0;back.strips=front.cam?strips:1;back.active=true;dirty=false;
+  }
+  if(!back.active)return;
+  var B=back.cam,P=program(B.formula),h0=Math.floor(DH*back.strip/back.strips),h1=Math.floor(DH*(back.strip+1)/back.strips);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,back.t.fbo);gl.viewport(0,0,DW,DH);
+  gl.enable(gl.SCISSOR_TEST);gl.scissor(0,h0,DW,h1-h0);
+  gl.useProgram(P.p);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,refTex);gl.uniform1i(P.u.uRef,0);
+  gl.uniform1i(P.u.uRefLen,back.len);gl.uniform1i(P.u.uMaxIter,B.iter);
+  gl.uniform2f(P.u.uRes,DW,DH);gl.uniform2f(P.u.uRot,Math.cos(B.rot),Math.sin(B.rot));
+  gl.uniform1f(P.u.uPix,B.span/Math.min(W,H));gl.uniform1f(P.u.uLift,B.lift);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,W,H);
+  if(++back.strip>=back.strips){
+    var t=front.t;front.t=back.t;back.t=t;front.cam=back.cam;back.active=false;
+  }
+}
 function setPalettes(P,C){
   gl.uniform3fv(P.u.uA,flat(C.pa));gl.uniform3fv(P.u.uB,flat(C.pb));gl.uniform1f(P.u.uMix,C.mix);
 }
@@ -936,23 +1046,18 @@ function draw(C){
   if(sz[0]!==W||sz[1]!==H){sizeTargets(sz[0],sz[1]);dirty=true;buddha.key="";}
   gl.viewport(0,0,W,H);
   if(C.kind==="escape"){
-    var key=[SET.id,C.re,C.im,C.span,C.rot,C.iter,C.kr,C.ki,W,H,lift].join(",");
-    if(dirty||key!==lastKey){
-      var len=referenceOrbit(C.formula,C.re,C.im,C.kr,C.ki,C.iter);
-      var P=program(C.formula);
-      gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
-      gl.useProgram(P.p);
-      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,refTex);gl.uniform1i(P.u.uRef,0);
-      gl.uniform1i(P.u.uRefLen,len);gl.uniform1i(P.u.uMaxIter,C.iter);
-      gl.uniform2f(P.u.uRes,W,H);gl.uniform2f(P.u.uRot,Math.cos(C.rot),Math.sin(C.rot));
-      gl.uniform1f(P.u.uPix,C.span/Math.min(W,H));gl.uniform1f(P.u.uLift,lift*H);
-      gl.drawArrays(gl.TRIANGLES,0,3);
-      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-      lastKey=key;dirty=false;
-    }
-    var K=program("colour");
+    escapeCompute(C);
+    if(!front.cam){gl.clearColor(.024,.012,.06,1);gl.clear(gl.COLOR_BUFFER_BIT);return;}
+    var F=front.cam,K=program("colour");
     gl.useProgram(K.p);
-    gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,dataTex);gl.uniform1i(K.u.uData,1);
+    gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,front.t.tex);gl.uniform1i(K.u.uData,1);
+    // screen pixel -> pixel of the finished view: R(C.rot - F.rot) * k, plus the shift between their centres
+    var fpix=F.span/Math.min(F.W,F.H),cpix=C.span/Math.min(W,H),k=cpix/fpix,a=C.rot-F.rot,ca=Math.cos(a)*k,sa=Math.sin(a)*k;
+    var dr=C.re-F.re,di=C.im-F.im;if(SET.formula==="ship")di=-di;
+    var cf=Math.cos(-F.rot),sf=Math.sin(-F.rot);
+    gl.uniformMatrix2fv(K.u.uM,false,[ca,sa,-sa,ca]);
+    gl.uniform2f(K.u.uOff,(cf*dr-sf*di)/fpix,(sf*dr+cf*di)/fpix+F.lift);
+    gl.uniform2f(K.u.uDataSize,DW,DH);gl.uniform1f(K.u.uLiftPx,lift*H);gl.uniform1f(K.u.uDist,1/k);
     setPalettes(K,C);
     gl.uniform1f(K.u.uTime,time);gl.uniform1f(K.u.uFlow,C.flow);gl.uniform1f(K.u.uDensity,C.density);gl.uniform1f(K.u.uGlow,C.glow);
     gl.uniform1f(K.u.uLight,lightA);gl.uniform2f(K.u.uRes,W,H);
@@ -968,16 +1073,27 @@ function draw(C){
     gl.uniform2f(B.u.uRes,W,H);gl.uniform1f(B.u.uLift,lift*H);
     gl.drawArrays(gl.TRIANGLES,0,3);
   }else{
-    var bkey=[SET.id,C.stage,W,H,lift].join(",");
-    if(bkey!==buddha.key){buddha.key=bkey;buddhaStart(C);}
+    var want=buddhaKey(C.stage);
+    if(want!==buddha.key)buddhaStart(C.stage,C.stage===C.stageB?buddhaKey(C.stageA):"");
     if(buddha.local&&(FILM||!buddha.worker))buddhaLocalStep();
     var D=program("buddha");gl.useProgram(D.p);
-    gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,buddha.tex);gl.uniform1i(D.u.uHist,2);
-    gl.uniform2f(D.u.uRes,W,H);gl.uniform2f(D.u.uHistSize,buddha.w,buddha.h);
-    gl.uniform3f(D.u.uNorm,1/buddha.levels[0],1/buddha.levels[1],1/buddha.levels[2]);
+    var layers=[["A",slotFor(buddhaKey(C.stageA)),C.wA],["B",C.wB>0?slotFor(buddhaKey(C.stageB)):null,C.wB]];
+    var cpix=C.span/Math.min(W,H);
+    layers.forEach(function(L,n){
+      var sl=L[1],X=L[0];
+      gl.uniform1f(D.u["uW"+X],sl?L[2]:0);
+      if(!sl)return;
+      var hc=sl.cam,k=cpix/hc.pix,a=C.rot-hc.rot,ca=Math.cos(a)*k,sa=Math.sin(a)*k,cf=Math.cos(-hc.rot),sf=Math.sin(-hc.rot);
+      var dr=C.re-hc.re,di=C.im-hc.im;
+      gl.activeTexture(gl.TEXTURE2+n);gl.bindTexture(gl.TEXTURE_2D,sl.tex);gl.uniform1i(D.u["uHist"+X],2+n);
+      gl.uniformMatrix2fv(D.u["uM"+X],false,[ca,sa,-sa,ca]);
+      gl.uniform2f(D.u["uOff"+X],(cf*dr-sf*di)/hc.pix+hc.w/2,(sf*dr+cf*di)/hc.pix+hc.h/2+hc.lift);
+      gl.uniform2f(D.u["uSize"+X],hc.w,hc.h);
+      gl.uniform3f(D.u["uNorm"+X],1/sl.levels[0],1/sl.levels[1],1/sl.levels[2]);
+    });
+    gl.uniform2f(D.u.uRes,W,H);gl.uniform1f(D.u.uLiftPx,lift*H);
     setPalettes(D,C);
-    // a new picture brightens in over its first moments, while it is still grainy
-    gl.uniform1f(D.u.uTime,time);gl.uniform1f(D.u.uFlow,C.flow);gl.uniform1f(D.u.uGlow,C.glow);gl.uniform1f(D.u.uFade,C.fade);
+    gl.uniform1f(D.u.uTime,time);gl.uniform1f(D.u.uFlow,C.flow);gl.uniform1f(D.u.uGlow,C.glow);
     gl.drawArrays(gl.TRIANGLES,0,3);
   }
 }
@@ -994,7 +1110,8 @@ function hud(C){
     itEl.textContent="camera "+C.dist.toFixed(3)+" from the centre";
     whereEl.textContent="9 iterations per step, up to 180 steps per ray";
   }else{
-    magEl.textContent=Math.round(buddha.traced*2).toLocaleString("en-GB")+" paths traced";
+    var tr=buddha.tracing>=0?buddha.slots[buddha.tracing].traced:0;
+    magEl.textContent=Math.round(tr*2).toLocaleString("en-GB")+" paths traced"+(HOME.span/C.span>1.05?" · magnification "+mag(C.span):"");
     itEl.textContent="limits "+C.limits.map(function(l){return l.toLocaleString("en-GB");}).join(" / ")+" (red / green / blue)";
     whereEl.textContent="";
   }
@@ -1037,7 +1154,7 @@ function frame(now){
     if(playing)glideTo=null;
     else{var gd=glideTo-T;if(Math.abs(gd)<.0005){setT(glideTo);glideTo=null;}else setT(T+gd*Math.min(1,dt*4));}
   }
-  var moving=false;
+  var moving=false;tRate=0;
   if(playing&&STAGES.length){
     if(phase==="holding"){hold-=dt;if(hold<=0){phase="leaving";hold=TEXT_OUT/1000+.3;}}
     else if(phase==="leaving"){hold-=dt;if(hold<=0)phase="moving";}
@@ -1046,6 +1163,7 @@ function frame(now){
       var k0=Math.floor(T+1e-9),nt=T+dt/legOf(k0).secs;
       if(nt>=k0+1){nt=k0+1;phase="holding";hold=dwell((k0+1)%LAST);}
       progress+=nt-T;
+      tRate=dt>0?(nt-T)/dt:0;
       setT(nt);
     }
   }
@@ -1066,7 +1184,7 @@ function frame(now){
   if(acc>=1){fpsEl.textContent="prototype 2.0 / "+Math.round(frames/acc)+" fps / "+W+"×"+H;frames=0;acc=0;}
   requestAnimationFrame(frame);
 }
-window.__mandel={camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
+window.__mandel={get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
   get playing(){return playing;},get set(){return SET&&SET.id;},stages:function(){return STAGES;},span:0};
 requestAnimationFrame(frame);
 })();

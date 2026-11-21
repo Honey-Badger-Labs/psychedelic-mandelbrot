@@ -68,7 +68,7 @@ for (const set of sets) {
         assert.ok(s.iter >= 200 && s.iter <= 16382, "iteration limit must fit the reference texture");
       }
     });
-    if (set.kind === "escape" && s.stage > 0) {
+    if ((set.kind === "escape" || set.kind === "buddha") && s.stage > 0) {
       test(`${name}: the stated magnification matches the span`, () => {
         const said = stated(s.scale), actual = home.span / s.span;
         if (/^the whole/.test(s.scale)) { assert.ok(actual < 1.5, "says the whole set but is zoomed in"); return; }
@@ -161,6 +161,8 @@ test("Mandelbulb: the shader's step is the stated rule, and each stage says its 
 
 test("Buddhabrot: the stated limits are the ones used", () => {
   for (const s of sets.find((x) => x.id === "buddha").stages) {
+    assert.ok(Array.isArray(s.limits) && s.limits.length >= 3, `${s.id}: three limits`);
+    if (!/green/.test(s.note)) continue;
     const [r, g, b] = s.limits.map((n) => n.toLocaleString("en-GB"));
     assert.match(s.note, new RegExp(`${r} steps, green ${g}, blue ${b}`));
   }

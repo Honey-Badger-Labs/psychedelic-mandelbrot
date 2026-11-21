@@ -573,7 +573,7 @@
           "tick": "Buddha",
           "title": "The Buddhabrot",
           "place": "paths of escaping points",
-          "scale": "c from −2.15 to 1.05",
+          "scale": "the whole figure, c from −2.15 to 1.05",
           "note": "Pick random c outside the set, follow 0 under z → z² + c until it escapes, and brighten every pixel its path crosses. Red counts paths up to 5,000 steps, green 500, blue 50.",
           "sources": [
             "buddha-check"
@@ -596,12 +596,68 @@
           "sound": "abyss"
         },
         {
-          "id": "deep",
+          "pace": 1,
+          "turn": 90,
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "label": "art",
+          "sources": [
+            "buddha-check"
+          ],
+          "limits": [
+            5000,
+            500,
+            50
+          ],
           "stage": 1,
+          "id": "heart",
+          "tick": "Heart",
+          "title": "The heart",
+          "re": -0.45,
+          "im": 0,
+          "span": 1.5,
+          "palette": "candy",
+          "sound": "spiral",
+          "place": "paths of escaping points",
+          "scale": "magnified 2 times",
+          "note": "Twice as close. To fill a small window quickly, paths that already crossed it are tried again with small changes, so busy parts glow brighter than strict random picking would make them."
+        },
+        {
+          "pace": 1,
+          "turn": 90,
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "label": "art",
+          "sources": [
+            "buddha-check"
+          ],
+          "limits": [
+            5000,
+            500,
+            50
+          ],
+          "stage": 2,
+          "id": "crown",
+          "tick": "Crown",
+          "title": "The crown",
+          "re": -1.05,
+          "im": 0,
+          "span": 1.1,
+          "palette": "ultraviolet",
+          "sound": "tendril",
+          "place": "paths of escaping points",
+          "scale": "magnified 3 times",
+          "note": "Further along the figure. Every glowing thread here is thousands of escaping paths laid on top of one another, still being traced as you watch."
+        },
+        {
+          "id": "deep",
+          "stage": 3,
           "tick": "Deep",
           "title": "Slow escapers",
           "place": "long paths only",
-          "scale": "c from −2.15 to 1.05",
+          "scale": "the whole figure, c from −2.15 to 1.05",
           "note": "Now red counts paths up to 20,000 steps, green 2,000, blue 200. The slow escapers start close to the set's edge, and their paths draw finer lace.",
           "sources": [
             "buddha-check"
