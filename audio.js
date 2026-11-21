@@ -92,7 +92,7 @@
 
     // the endless glissando: eight sines an octave apart, loudest in the middle, sliding together
     var SHEP = 8, shepOut = gain(0), shep = [], shepPhase = 0;
-    chain(shepOut, filt("lowpass", 1000, 0.5), mix);
+    chain(shepOut, filt("lowpass", 700, 0.5), mix);
     for (var i = 0; i < SHEP; i++) { var o = osc("sine", 40); var g = gain(0); chain(o, g, shepOut); shep.push({ o: o, g: g }); }
     function shepard(now) {
       for (var i = 0; i < SHEP; i++) {
@@ -103,7 +103,7 @@
         // a voice wrapping from top to bottom is silent there, so it jumps without a click
         if (prev !== undefined && Math.abs(pos - prev) > SHEP / 2) shep[i].o.frequency.setValueAtTime(f, now);
         else smooth(shep[i].o.frequency, f, now, 0.06);
-        smooth(shep[i].g.gain, Math.exp(-x * x) * 0.022, now, 0.06);
+        smooth(shep[i].g.gain, Math.exp(-x * x) * 0.0075, now, 0.06);
       }
     }
 
@@ -142,7 +142,7 @@
         rate = Math.max(-6, Math.min(6, rate));
         // half the speed it used to glide at, and swelling in and out over seconds rather than following every change
         shepPhase += rate * dt * 0.03;
-        smooth(shepOut.gain, Math.min(0.7, Math.sqrt(Math.abs(rate)) / 2.2), now, 2);
+        smooth(shepOut.gain, Math.min(0.6, Math.sqrt(Math.abs(rate)) / 2.4), now, 2.5);
         shepard(now);
       }
     };

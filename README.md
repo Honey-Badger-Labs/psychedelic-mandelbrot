@@ -8,7 +8,7 @@ A psychedelic deep-zoom journey through five fractals, painted in flowing neon p
 | **Julia** | One formula, five constants: the rabbit, a golden whirlpool, lightning, spirals, near-dust. The shape melts from one to the next | 5 |
 | **Burning Ship** | The Mandelbrot formula with a fold: hulls, masts and a Gothic cathedral of rigging | 4 |
 | **Mandelbulb** | A 3D cousin, ray-marched and lit, its power melting from 8 to 4 | 3 |
-| **Buddhabrot** | The paths of escaping points, traced live; it develops like a photograph, then zooms into the heart and the crown | 4 |
+| **Buddhabrot** | The paths of escaping points, traced live on every core; it develops like a photograph, then dives down its spine to a small Buddha, 86 × closer | 7 |
 
 ## Run it
 
@@ -43,7 +43,7 @@ Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=�
   - **Mandelbulb**: ray-marched with its distance estimate, ambient occlusion and a rim light, coloured by an orbit trap.
   - **Buddhabrot**: a Web Worker traces random escaping orbits and counts the pixels they cross, at three iteration limits; the shader paints the three counts in three palette colours.
   - **Motion**: zooms move at a steady speed in log-scale, easing in and out over a few seconds. A deep view can take a GPU longer than one frame to compute, so it is computed a strip at a time for where the camera *will* be, while every frame shows the last finished view moved, scaled and turned to where the camera *is*. The picture moves at the screen's full frame rate however heavy the maths. Auto resolution only changes while the view rests.
-  - **Buddhabrot zoom**: the old exposure is carried along and fades while the next view develops underneath; small windows retry paths that crossed them, so they fill in seconds.
+  - **Buddhabrot zoom**: the old exposure is carried along and fades while the next view develops underneath. Small windows are sampled with Metropolis-Hastings (nudge paths that crossed the window, weight each by 1 / cells crossed), which gives the same picture as random sampling far sooner, on one worker per spare core.
 - **`audio.js`**: one live-generated voice per stage, crossfaded, over a Shepard-Risset glissando driven by the zoom speed.
 - **`data/sets.json`** is the map: each set, and for each stage its place, depth, rotation, iteration limit, palette, voice and text.
 - **`data/sources.json`** says which check backs each claim. There are no outside sources: see [docs/maths-policy.md](docs/maths-policy.md).
