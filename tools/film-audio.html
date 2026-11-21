@@ -5,18 +5,20 @@
 <p>Used by tools/film.mjs: renders the soundtrack offline for a recorded timeline.</p>
 <script src="../audio.js"></script>
 <script>
-// o.track holds [journey position, view span] at every film frame. The soundtrack is driven exactly as the page
+// o.track holds [journey position, view span, set] at every film frame. The soundtrack is driven exactly as the page
 // drives it: on from just before Play is pressed, updated with the position and the camera, faded over 8 s at the end.
 window.renderFilmAudio = async function (o) {
   var STEP = 0.05;
   var ctx = new OfflineAudioContext(2, Math.ceil(o.rate * o.seconds), o.rate);
-  var snd = createSoundtrack(ctx, ctx.destination, o.names), on = false, off = false;
+  // o.voices: each set's stage voices; the track says which set each frame shows (the tour changes set)
+  var current = o.track[0][2], snd = createSoundtrack(ctx, ctx.destination, o.voices[current]), on = false, off = false;
   for (var t = 0; t < o.seconds - STEP; t += STEP) {
     (function (time) {
       ctx.suspend(time).then(function () {
         if (!on && time >= Math.max(0, o.head - 1.5)) { snd.setOn(true); on = true; }
         if (!off && o.endedAt >= 0 && time >= o.endedAt) { snd.setOn(false, 8); off = true; }
         var f = o.track[Math.min(o.track.length - 1, Math.round(time * o.fps))];
+        if (f[2] !== current) { current = f[2]; snd.setVoices(o.voices[current]); }
         snd.update(f[0], { span: f[1] });
         ctx.resume();
       });
