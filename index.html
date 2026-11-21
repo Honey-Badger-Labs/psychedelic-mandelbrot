@@ -840,6 +840,19 @@ function recType(){
   for(var i=0;i<types.length;i++)if(window.MediaRecorder&&MediaRecorder.isTypeSupported(types[i]))return types[i];
   return "";
 }
+// Saving: inside claude.ai the viewer's own save prompt (the downloads capability); anywhere else, a plain download
+var downloadsCap=null;
+if(window.claude&&window.claude.use)window.claude.use("downloads").then(function(d){downloadsCap=d;}).catch(function(){});
+function saveVideo(blob,url,name){
+  var out=document.getElementById("saved");
+  if(downloadsCap){
+    downloadsCap.save({filename:name,data:blob}).then(function(){out.textContent="Saved "+name+".";})
+      .catch(function(e){out.textContent=e&&e.code==="declined"?"Not saved.":"This view cannot save files"+(e&&e.code?" ("+e.code+")":"")+".";});
+    return;
+  }
+  var a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  out.textContent="Saving "+name+". If nothing happens, this view blocks downloads: open the page from its GitHub Pages address.";
+}
 recBtn.addEventListener("click",function(){
   if(recorder){recorder.stop();return;}
   if(!window.MediaRecorder||!canvas.captureStream){showToast('<p>This browser cannot record video. Try a current Chrome, Edge, Firefox or Safari, or use <code>tools/film.mjs</code>.</p><div class="row"><button type="button" data-close>Close</button></div>');return;}
@@ -860,7 +873,8 @@ recBtn.addEventListener("click",function(){
     recorder=null;recBtn.classList.remove("on");recBtn.textContent="Rec";recBtn.setAttribute("aria-pressed","false");
     showToast('<video src="'+url+'" controls playsinline></video><p>'+(blob.size/1048576).toFixed(1)+' MB, '+ext.toUpperCase()+
       (soundOn?', with sound.':', silent (turn Sound on before recording to include it).')+
-      ' If Save does nothing here, open the page from its GitHub Pages address, where downloads are allowed.</p><div class="row"><a href="'+url+'" download="'+name+'">Save '+name+'</a><button type="button" data-close>Close</button></div>');
+      '</p><p id="saved"></p><div class="row"><button type="button" id="save">Save video</button><button type="button" data-close>Close</button></div>');
+    document.getElementById("save").addEventListener("click",function(){saveVideo(blob,url,name);});
   };
   recorder.start(1000);
   recBtn.classList.add("on");recBtn.textContent="Stop";recBtn.setAttribute("aria-pressed","true");

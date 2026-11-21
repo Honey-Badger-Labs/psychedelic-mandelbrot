@@ -23,7 +23,7 @@ Keys: Space plays and pauses, M sound, **T no text** (only the picture; the cont
 
 ## Recording
 
-- **Rec button (quick, real time).** Records the canvas, with sound if Sound is on, to an MP4 or WebM as fast as your GPU draws. Text is never in it. Downloads work on GitHub Pages or a local server; the claude.ai preview blocks them.
+- **Rec button (quick, real time).** Records the canvas, with sound if Sound is on, to an MP4 or WebM as fast as your GPU draws. Text is never in it. Save asks for confirmation inside claude.ai and downloads directly anywhere else.
 - **`tools/film.mjs` (perfect, frame by frame).** Replaces the page's clock, renders every frame however slowly, renders the soundtrack offline from the same timeline, and joins them with ffmpeg. With or without text (`--clean`), any size (`--width 1080 --height 1920` for vertical clips), any part (`--from 2 --to 3`). Run it locally (notes at the top of the file) or from **Actions → Film → Run workflow**; the MP4 appears under the run's Artifacts. Software rendering is slow: a one-stage clip at 1080p takes from minutes (Julia, Ship) to hours (deep Mandelbrot, Mandelbulb). `--scale 0.5` is four times quicker.
 
 Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=…&span=…` overrides that stage's view (for finding new places), `?scale=1` fixes the resolution, `?still` freezes the colour flow, `?clean` hides the text, `?autoplay` starts playing.
