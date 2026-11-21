@@ -601,7 +601,7 @@
           "flow": 0.03,
           "density": 0.3,
           "glow": 0.5,
-          "label": "art",
+          "label": "computed",
           "sources": [
             "buddha-check"
           ],
@@ -621,7 +621,7 @@
           "sound": "spiral",
           "place": "paths of escaping points",
           "scale": "magnified 2 times",
-          "note": "Twice as close. To fill a small window quickly, paths that already crossed it are tried again with small changes, so busy parts glow brighter than strict random picking would make them."
+          "note": "Twice as close. Paths that cross a small window are found by nudging ones that already did, then weighted so the picture matches plain random sampling, only sooner."
         },
         {
           "pace": 1,
@@ -629,7 +629,7 @@
           "flow": 0.03,
           "density": 0.3,
           "glow": 0.5,
-          "label": "art",
+          "label": "computed",
           "sources": [
             "buddha-check"
           ],
@@ -652,8 +652,92 @@
           "note": "Further along the figure. Every glowing thread here is thousands of escaping paths laid on top of one another, still being traced as you watch."
         },
         {
+          "pace": 1,
+          "turn": 90,
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "label": "computed",
+          "sources": [
+            "buddha-check"
+          ],
+          "limits": [
+            5000,
+            500,
+            50
+          ],
+          "place": "paths of escaping points",
+          "id": "crest",
+          "tick": "Crest",
+          "title": "The crest",
+          "re": -1.2,
+          "im": 0,
+          "span": 0.35,
+          "palette": "sherbet",
+          "sound": "star",
+          "scale": "magnified 9 times",
+          "note": "Nine times closer, at the crest of the figure, where thousands of slow paths cross and pile up into a bright point.",
+          "stage": 3
+        },
+        {
+          "pace": 1,
+          "turn": 90,
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "label": "computed",
+          "sources": [
+            "buddha-check"
+          ],
+          "limits": [
+            5000,
+            500,
+            50
+          ],
+          "place": "paths of escaping points",
+          "id": "spine",
+          "tick": "Spine",
+          "title": "The spine",
+          "re": -1.75,
+          "im": 0,
+          "span": 0.3,
+          "palette": "ice",
+          "sound": "abyss",
+          "scale": "magnified 10 times",
+          "note": "Along the figure's spine, which lies on the real line: beads of light strung one above another, each a place where many paths pass close by.",
+          "stage": 4
+        },
+        {
+          "pace": 1,
+          "turn": 90,
+          "flow": 0.03,
+          "density": 0.3,
+          "glow": 0.5,
+          "label": "computed",
+          "sources": [
+            "buddha-check"
+          ],
+          "limits": [
+            5000,
+            500,
+            50
+          ],
+          "place": "paths of escaping points",
+          "id": "small",
+          "tick": "Small Buddha",
+          "title": "The small Buddha",
+          "re": -1.772,
+          "im": 0,
+          "span": 0.035,
+          "palette": "aurora",
+          "sound": "minibrot",
+          "scale": "magnified 86 times",
+          "note": "Eighty-six times closer, down the spine, sits a smaller figure with the shape of the whole, still being traced as you watch.",
+          "stage": 5
+        },
+        {
           "id": "deep",
-          "stage": 3,
+          "stage": 6,
           "tick": "Deep",
           "title": "Slow escapers",
           "place": "long paths only",

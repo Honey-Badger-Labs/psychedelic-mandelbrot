@@ -405,7 +405,8 @@ precision highp float;
 uniform highp sampler2D uHistA, uHistB;
 uniform mat2 uMA, uMB;
 uniform vec2 uOffA, uOffB, uSizeA, uSizeB, uRes;
-uniform vec3 uNormA, uNormB;   // 1 / a high percentile of each count, so a picture keeps its exposure as it fills
+uniform vec3 uNormA, uNormB;   // 1 / (high - low percentile) of each count, so a picture keeps its exposure as it fills
+uniform vec3 uLowA, uLowB;
 uniform float uWA, uWB, uLiftPx, uTime, uFlow, uGlow;
 out vec4 o;
 `+GLSL_PAL+`
@@ -413,15 +414,15 @@ vec3 counts(highp sampler2D h,vec2 q,vec2 size){
   // bilinear by hand (float textures cannot always be filtered), so a magnified exposure stays smooth
   vec2 x=q-.5,f=fract(x); ivec2 i=ivec2(floor(x)),m=ivec2(size)-1;
   // soft edges, so the end of a traced window never shows as a line
-  vec2 edge=min(q,size-q)/(.06*size);
+  vec2 edge=min(q,size-q)/(.22*size);
   float soft=smoothstep(0.,1.,clamp(min(edge.x,edge.y),0.,1.));
   if(soft<=0.)return vec3(0);
   vec3 a=texelFetch(h,clamp(i,ivec2(0),m),0).rgb,b=texelFetch(h,clamp(i+ivec2(1,0),ivec2(0),m),0).rgb;
   vec3 c=texelFetch(h,clamp(i+ivec2(0,1),ivec2(0),m),0).rgb,d=texelFetch(h,clamp(i+ivec2(1,1),ivec2(0),m),0).rgb;
   return mix(mix(a,b,f.x),mix(c,d,f.x),f.y)*soft;
 }
-vec3 paint(vec3 h,vec3 norm){
-  vec3 v=clamp(pow(h*norm,vec3(.6)),0.,1.2);
+vec3 paint(vec3 h,vec3 low,vec3 norm){
+  vec3 v=clamp(pow(max(h-low,0.)*norm,vec3(.6)),0.,1.2);
   float t=-uTime*uFlow;
   vec3 col=v.r*palette(t)+v.g*palette(t+.33)*.9+v.b*palette(t+.66)*.8;
   return col+pow(v.r*v.g*v.b,1.5)*uGlow*.6;
@@ -429,8 +430,8 @@ vec3 paint(vec3 h,vec3 norm){
 void main(){
   vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
   vec3 col=vec3(0);
-  if(uWA>0.)col+=paint(counts(uHistA,uMA*fd+uOffA,uSizeA),uNormA)*uWA;
-  if(uWB>0.)col+=paint(counts(uHistB,uMB*fd+uOffB,uSizeB),uNormB)*uWB;
+  if(uWA>0.)col+=paint(counts(uHistA,uMA*fd+uOffA,uSizeA),uLowA,uNormA)*uWA;
+  if(uWB>0.)col+=paint(counts(uHistB,uMB*fd+uOffB,uSizeB),uLowB,uNormB)*uWB;
   col+=vec3(.008,.004,.02);
   o=vec4(finish(col,gl_FragCoord.xy,uRes),1.);
 }`;
@@ -642,7 +643,11 @@ function camAt(T){
     var w=Math.abs(A.span-B.span)>1e-9?(A.span-sp)/(A.span-B.span):e;
     C.re=lerp(A.re,B.re,w);C.im=lerp(A.im,B.im,w);C.span=sp;C.rot=lerpAngle(A.turn,B.turn,e)*Math.PI/180;
     C.stageA=k%n;C.stageB=(k+1)%n;C.stage=fr>0?C.stageB:C.stageA;C.limits=STAGES[C.stage].limits;
-    C.wA=fr<=0?1:1-smoother((fr-.3)/.6);C.wB=fr<=0?0:smoother((fr-.08)/.7);
+    // each exposure shows only once it covers the screen (a window still smaller than the view would show as a
+    // box), and the one we leave gives way as the next takes over
+    var coverA=Math.min(1,A.span*1.3/sp),coverB=Math.min(1,B.span*1.3/sp);
+    C.wB=fr<=0?0:smoother((coverB-.55)/.4)*smoother((fr-.04)/.45);
+    C.wA=fr<=0?1:(1-C.wB)*smoother((coverA-.4)/.45);
     C.mix=e;
   }
   C.flow=lerp(A.flow,B.flow,C.mix);C.density=lerp(A.density,B.density,C.mix);C.glow=lerp(A.glow,B.glow,C.mix);
@@ -658,103 +663,147 @@ function buddhaTracer(){
   function rnd(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;}
   function start(p){
     st=p;seed=p.seed||12345;st.hist=new Float32Array(p.w*p.h*4);st.traced=0;
-    // a small window: most random paths never cross it, so paths that did are tried again with small changes
-    st.zoom=p.span<2.4;st.seeds=[];st.mut=.004*p.span;
-    var L=Math.max(p.limits[0],p.limits[1],p.limits[2]);st.minK=p.limits[3]||12;st.ox=new Float64Array(L+1);st.oy=new Float64Array(L+1);st.L=L;
+    var L=Math.max(p.limits[0],p.limits[1],p.limits[2]);st.minK=p.limits[3]||12;st.L=L;
+    st.ox=new Float64Array(L+1);st.oy=new Float64Array(L+1);
+    // a window smaller than the figure is sampled with Metropolis-Hastings (below)
+    st.zoom=p.span<2.4;
+    st.cur={idx:new Int32Array(2*L+2),n:0,k:0,cr:0,ci:0};st.tmp={idx:new Int32Array(2*L+2),n:0,k:0,cr:0,ci:0};
   }
-  function plot(x,y,k){
+  // which histogram cell a point of a path lands in, or -1 outside the window
+  function cell(x,y){
     var dx=x-st.re,dy=y-st.im,u=(dx*st.cos+dy*st.sin)/st.pix,v=(-dx*st.sin+dy*st.cos)/st.pix;
     var px=Math.floor(st.w/2+u),py=Math.floor(st.h/2+v+st.lift);
-    if(px<0||py<0||px>=st.w||py>=st.h)return 0;
-    var i=(py*st.w+px)*4,l=st.limits;
-    if(k<=l[0])st.hist[i]++;
-    if(k<=l[1])st.hist[i+1]++;
-    if(k<=l[2])st.hist[i+2]++;
-    return 1;
+    return px<0||py<0||px>=st.w||py>=st.h?-1:(py*st.w+px)*4;
+  }
+  function add(i,k,w){
+    var l=st.limits,h=st.hist;
+    if(k<=l[0])h[i]+=w;
+    if(k<=l[1])h[i+1]+=w;
+    if(k<=l[2])h[i+2]+=w;
+  }
+  // follow 0 under z -> z^2 + c; the cells its escaping path (and its mirror image, which c's conjugate traces)
+  // crosses go into into.idx. Returns how many: 0 for a path that never escapes, or escapes too soon
+  function trace(cr,ci,into){
+    into.n=0;
+    var q=(cr-.25)*(cr-.25)+ci*ci;
+    if(q*(q+(cr-.25))<.25*ci*ci||(cr+1)*(cr+1)+ci*ci<.0625)return 0;   // inside the two largest regions: never escapes
+    var ox=st.ox,oy=st.oy,L=st.L,x=0,y=0,k=0,esc=false;
+    for(k=1;k<=L;k++){var t=x*x-y*y+cr;y=2*x*y+ci;x=t;ox[k]=x;oy[k]=y;if(x*x+y*y>4){esc=true;break;}}
+    if(!esc||k<st.minK)return 0;
+    for(var j=2;j<k;j++){
+      var a=cell(ox[j],oy[j]);if(a>=0)into.idx[into.n++]=a;
+      var b=cell(ox[j],-oy[j]);if(b>=0)into.idx[into.n++]=b;
+    }
+    into.k=k;into.cr=cr;into.ci=ci;
+    return into.n;
   }
   function run(samples){
     if(!st)return;
-    var ox=st.ox,oy=st.oy,L=st.L;
     for(var s=0;s<samples;s++){
-      var cr,ci,fromSeed=st.zoom&&st.seeds.length>20&&rnd()<.5;
-      if(fromSeed){
-        var sd=st.seeds[(rnd()*st.seeds.length)|0],r=st.mut*Math.pow(10,-2.5*rnd()),a=rnd()*6.2831853;
-        cr=sd[0]+r*Math.cos(a);ci=sd[1]+r*Math.sin(a);
-      }else{cr=rnd()*3.2-2.15;ci=rnd()*3.2-1.6;}
-      // skip the two largest regions inside the set: their orbits never escape
-      var q=(cr-.25)*(cr-.25)+ci*ci;
-      if(q*(q+(cr-.25))<.25*ci*ci||(cr+1)*(cr+1)+ci*ci<.0625)continue;
-      var x=0,y=0,k=0,esc=false;
-      for(k=1;k<=L;k++){
-        var t=x*x-y*y+cr;y=2*x*y+ci;x=t;ox[k]=x;oy[k]=y;
-        if(x*x+y*y>4){esc=true;break;}
+      if(!st.zoom){
+        // the whole figure: random c, every path drawn as it is
+        trace(rnd()*3.2-2.15,rnd()*3.2-1.6,st.tmp);st.traced++;
+        for(var j=0;j<st.tmp.n;j++)add(st.tmp.idx[j],st.tmp.k,1);
+        continue;
       }
-      if(!esc||k<st.minK)continue;
-      st.traced++;
-      // the mirror image is a valid path too (c's conjugate traces it), so each orbit is drawn twice
-      var hits=0;
-      for(var j=2;j<k;j++){hits+=plot(ox[j],oy[j],k);hits+=plot(ox[j],-oy[j],k);}
-      if(st.zoom&&hits){if(st.seeds.length<4000)st.seeds.push([cr,ci]);else st.seeds[(rnd()*4000)|0]=[cr,ci];}
+      // A small window: Metropolis-Hastings. Mostly try small changes of a path that crossed the window (now
+      // and then a fresh random one), accept with probability (cells crossed now / cells crossed before), and
+      // draw the current path with weight 1 / its cells crossed. Busy paths are found far more often, and the
+      // weight cancels that out, so the picture is the one random sampling would give, found much faster.
+      var cur=st.cur,cr,ci;
+      if(!cur.n||rnd()<.12){cr=rnd()*3.2-2.15;ci=rnd()*3.2-1.6;}
+      else{var r=Math.pow(10,-7+5.5*rnd()),a=rnd()*6.2831853;cr=cur.cr+r*Math.cos(a);ci=cur.ci+r*Math.sin(a);}
+      var n=trace(cr,ci,st.tmp);st.traced++;
+      if(n>0&&(!cur.n||rnd()*cur.n<n)){var t=st.cur;st.cur=st.tmp;st.tmp=t;cur=st.cur;}
+      if(cur.n){var w=1/cur.n;for(var m=0;m<cur.n;m++)add(cur.idx[m],cur.k,w);}
     }
   }
-  function levels(){
-    // exposure from a high percentile, not the maximum, so a few hot pixels cannot darken the picture
-    var out=[1,1,1],h=st.hist,n=st.w*st.h;
-    for(var ch=0;ch<3;ch++){
-      var sample=[];
-      for(var i=ch;i<h.length;i+=4*Math.max(1,Math.floor(n/4000)))if(h[i]>0)sample.push(h[i]);
-      sample.sort(function(a,b){return a-b;});
-      out[ch]=sample.length?sample[Math.floor(sample.length*.9995)]||1:1;
-    }
-    return out;
-  }
-  return {start:start,run:run,levels:levels,state:function(){return st;}};
+  // what a worker sends: the counts added since last time (the page adds up every worker's)
+  function take(){var h=st.hist,t=st.traced;st.hist=new Float32Array(h.length);st.traced=0;return {hist:h,traced:t};}
+  return {start:start,run:run,take:take,state:function(){return st;}};
 }
-// two exposures: slot 0 and 1 hold a stage's histogram each; the tracer fills one at a time
-var buddha={slots:[0,1].map(function(){var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);nearest();return {tex:t,key:"",cam:null,levels:[1,1,1],traced:0};}),
-  tracing:-1,key:"",worker:null,local:null};
+// exposure from a high percentile, not the maximum, so a few hot pixels cannot darken the picture
+// and from a low percentile, not zero: up close the figure is a glow over the whole window, and its
+// structure only shows when that floor is taken away. Returns [hi r, g, b, lo r, g, b]
+function histLevels(h,n){
+  var out=[1,1,1,0,0,0];
+  for(var ch=0;ch<3;ch++){
+    var sample=[];
+    for(var i=ch;i<h.length;i+=4*Math.max(1,Math.floor(n/6000)))sample.push(h[i]);
+    sample.sort(function(a,b){return a-b;});
+    var lo=sample[Math.floor(sample.length*.03)]||0,hi=sample[Math.floor(sample.length*.9995)]||0;
+    out[ch]=hi>lo?hi:lo+1;out[ch+3]=lo;
+  }
+  return out;
+}
+// two exposures: slot 0 and 1 hold a stage's histogram each, added up from every worker's counts
+var buddha={slots:[0,1].map(function(){var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);nearest();return {tex:t,key:"",cam:null,levels:[1,1,1,0,0,0],traced:0,acc:null,dirty:false,up:0,lv:0};}),
+  tracing:-1,key:"",workers:null,local:null};
 var FILM=/[?&]film/.test(Q);
+// one worker per spare core, up to six
+var BUDDHA_WORKERS=Math.max(1,Math.min(6,(navigator.hardwareConcurrency||4)-1));
 function buddhaKey(st){return [SET.id,st,W,H,lift].join(",");}
 function slotFor(key){for(var i=0;i<2;i++)if(buddha.slots[i].key===key)return buddha.slots[i];return null;}
 function buddhaStart(stage,keep){
   var S=STAGES[stage],key=buddhaKey(stage);
   // reuse the slot not showing the view we are leaving
   var i=buddha.slots[0].key===keep?1:0,slot=buddha.slots[i];
-  // traced a little wider than the view, so the zoom towards it has picture at the edges
-  var w=Math.max(64,Math.round(W*1.35)),h=Math.max(64,Math.round(H*1.35)),rot=S.turn*Math.PI/180;
-  var p={w:w,h:h,re:S.re,im:S.im,span:S.span,pix:S.span/Math.max(1,Math.min(W,H)),cos:Math.cos(rot),sin:Math.sin(rot),limits:S.limits,lift:lift*H,seed:7+stage,key:key,slot:i};
-  slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:p.pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1];slot.traced=0;
+  // traced a little wider than the view, so the zoom towards it has picture at the edges; at most about
+  // 1.2 million cells (the shader smooths them), so adding up every worker's counts stays cheap at full HD
+  // a zoomed window gets a coarser grid: every cell then collects more paths, which halves the grain, and
+  // the glow up close is soft anyway
+  var cells=W*1.35*H*1.35,hs=Math.min(1,Math.sqrt((S.span<2.4?3.5e5:1.2e6)/cells));
+  var w=Math.max(64,Math.round(W*1.35*hs)),h=Math.max(64,Math.round(H*1.35*hs)),rot=S.turn*Math.PI/180;
+  var pix=S.span/Math.max(1,Math.min(W,H))/hs;
+  var p={w:w,h:h,re:S.re,im:S.im,span:S.span,pix:pix,cos:Math.cos(rot),sin:Math.sin(rot),limits:S.limits,lift:lift*H*hs,seed:7+stage,key:key,slot:i};
+  slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1,0,0,0];slot.traced=0;
+  slot.acc=new Float32Array(w*h*4);slot.dirty=false;slot.up=0;slot.lv=0;
   gl.bindTexture(gl.TEXTURE_2D,slot.tex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,new Float32Array(w*h*4));
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,slot.acc);
   buddha.key=key;buddha.tracing=i;
   if(FILM||!window.Worker){buddha.local=buddha.local||buddhaTracer();buddha.local.start(p);return;}
-  if(!buddha.worker){
+  if(!buddha.workers){
     var src="var T=("+buddhaTracer.toString()+")();var gen=0;"+
       "onmessage=function(e){if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen,d=e.data;"+
-      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<200)T.run(3000);"+
-      "var s=T.state();postMessage({hist:s.hist.slice(),levels:T.levels(),traced:s.traced,key:d.key,slot:d.slot});setTimeout(loop,0);})();};";
-    try{buddha.worker=new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));}
-    catch(e){buddha.worker=null;buddha.local=buddhaTracer();buddha.local.start(p);return;}
-    buddha.worker.onmessage=function(e){
-      var slot=buddha.slots[e.data.slot];
-      if(e.data.key!==slot.key||e.data.key!==buddha.key)return;
-      gl.bindTexture(gl.TEXTURE_2D,slot.tex);
-      gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,slot.cam.w,slot.cam.h,gl.RGBA,gl.FLOAT,e.data.hist);
-      slot.levels=e.data.levels;slot.traced=e.data.traced;
-    };
+      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<450)T.run(2000);"+
+      "var r=T.take();postMessage({hist:r.hist,traced:r.traced,key:d.key,slot:d.slot},[r.hist.buffer]);setTimeout(loop,0);})();};";
+    try{
+      var url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
+      buddha.workers=[];
+      for(var k=0;k<BUDDHA_WORKERS;k++){
+        var wk=new Worker(url);
+        wk.onmessage=function(e){
+          var sl=buddha.slots[e.data.slot];
+          if(e.data.key!==sl.key||!sl.acc||sl.acc.length!==e.data.hist.length)return;
+          var a=sl.acc,d=e.data.hist;for(var j=0;j<a.length;j++)a[j]+=d[j];
+          sl.traced+=e.data.traced;sl.dirty=true;
+        };
+        buddha.workers.push(wk);
+      }
+    }catch(e){buddha.workers=null;buddha.local=buddhaTracer();buddha.local.start(p);return;}
   }
-  buddha.worker.postMessage(p);
+  // each worker traces with its own random numbers
+  buddha.workers.forEach(function(wk,n){var q=Object.assign({},p);q.seed=p.seed*7919+n*104729+1;wk.postMessage(q);});
 }
-function buddhaStop(){if(buddha.worker)buddha.worker.postMessage({stop:true});buddha.key="";buddha.slots.forEach(function(s){s.key="";});}
+function buddhaStop(){if(buddha.workers)buddha.workers.forEach(function(w){w.postMessage({stop:true});});buddha.key="";buddha.slots.forEach(function(s){s.key="";});}
+// the summed counts go to the GPU at most ten times a second; the exposure is worked out twice a second
+function buddhaUpload(){
+  var now=performance.now();
+  buddha.slots.forEach(function(sl){
+    if(!sl.dirty||!sl.acc||now-sl.up<100)return;
+    gl.bindTexture(gl.TEXTURE_2D,sl.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,sl.cam.w,sl.cam.h,gl.RGBA,gl.FLOAT,sl.acc);
+    sl.dirty=false;sl.up=now;
+    if(now-sl.lv>500){sl.levels=histLevels(sl.acc,sl.cam.w*sl.cam.h);sl.lv=now;}
+  });
+}
 function buddhaLocalStep(){
   if(!buddha.local||!buddha.local.state()||buddha.tracing<0)return;
   buddha.local.run(FILM?24000:5000);
+  var r=buddha.local.take(),slot=buddha.slots[buddha.tracing];
+  if(slot.acc&&slot.acc.length===r.hist.length){var a=slot.acc;for(var j=0;j<a.length;j++)a[j]+=r.hist[j];slot.traced+=r.traced;slot.dirty=true;}
   buddha.frames=(buddha.frames||0)+1;
-  if(buddha.frames%4)return;
-  var s=buddha.local.state(),slot=buddha.slots[buddha.tracing];
-  gl.bindTexture(gl.TEXTURE_2D,slot.tex);
-  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,slot.cam.w,slot.cam.h,gl.RGBA,gl.FLOAT,s.hist);
-  slot.levels=buddha.local.levels();slot.traced=s.traced;
+  if(FILM&&buddha.frames%4===0){slot.lv=0;slot.up=0;}
 }
 
 // =====================================================================================================
@@ -1185,7 +1234,8 @@ function draw(C){
   }else{
     var want=buddhaKey(C.stage);
     if(want!==buddha.key)buddhaStart(C.stage,C.stage===C.stageB?buddhaKey(C.stageA):"");
-    if(buddha.local&&(FILM||!buddha.worker))buddhaLocalStep();
+    if(buddha.local&&(FILM||!buddha.workers))buddhaLocalStep();
+    buddhaUpload();
     var D=program("buddha");gl.useProgram(D.p);
     var layers=[["A",slotFor(buddhaKey(C.stageA)),C.wA],["B",C.wB>0?slotFor(buddhaKey(C.stageB)):null,C.wB]];
     var cpix=C.span/Math.min(W,H);
@@ -1199,7 +1249,9 @@ function draw(C){
       gl.uniformMatrix2fv(D.u["uM"+X],false,[ca,sa,-sa,ca]);
       gl.uniform2f(D.u["uOff"+X],(cf*dr-sf*di)/hc.pix+hc.w/2,(sf*dr+cf*di)/hc.pix+hc.h/2+hc.lift);
       gl.uniform2f(D.u["uSize"+X],hc.w,hc.h);
-      gl.uniform3f(D.u["uNorm"+X],1/sl.levels[0],1/sl.levels[1],1/sl.levels[2]);
+      var lv=sl.levels;
+      gl.uniform3f(D.u["uNorm"+X],1/Math.max(1e-9,lv[0]-(lv[3]||0)),1/Math.max(1e-9,lv[1]-(lv[4]||0)),1/Math.max(1e-9,lv[2]-(lv[5]||0)));
+      gl.uniform3f(D.u["uLow"+X],lv[3]||0,lv[4]||0,lv[5]||0);
     });
     gl.uniform2f(D.u.uRes,W,H);gl.uniform1f(D.u.uLiftPx,lift*H);
     setPalettes(D,C);
