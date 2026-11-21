@@ -49,4 +49,4 @@ Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=â€¦&im=â€
 
 ## Licence
 
-The code (`index.html`, `audio.js`, `tests/`, `tools/`, `.github/`, `package.json`) is [MIT](LICENSE). The content (the map text, the choice of route, docs, the name) is all rights reserved; see [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
+The code (`index.html`, `audio.js`, `tests/`, `tools/`, `.github/`, `package.json`) is free for noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE); commercial use needs a licence from the copyright holder (open an issue to ask). The content (the map text, the choice of route, docs, the name) is all rights reserved; see [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
