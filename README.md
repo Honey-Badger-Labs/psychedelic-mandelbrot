@@ -17,7 +17,7 @@ npm run serve        # then open http://localhost:8000
 npm test             # checks the map's arithmetic
 ```
 
-Pick a set at the top right. Jump straight there with a hash: `#julia`, `#ship-cathedral`, `#seahorse` (a Mandelbrot stage).
+**All** (the default) tours every fractal in turn: each journey ends by pulling back to its overview, which dissolves into the next fractal's. Pick one fractal at the top right to loop just that one. Jump straight there with a hash: `#all`, `#julia`, `#ship-cathedral`, `#seahorse` (a Mandelbrot stage).
 
 Keys: Space plays and pauses, M sound, **T no text** (only the picture; the controls fade until you move the pointer), **R record**, arrows step. The journey loops.
 
