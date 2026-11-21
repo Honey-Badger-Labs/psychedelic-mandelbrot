@@ -1,0 +1,40 @@
+{
+  "about": "What backs each claim. This project makes no historical or empirical claims: every statement in the map is about arithmetic, and each one is checked by a test you can run (npm test).",
+  "sources": [
+    {
+      "id": "definition",
+      "title": "Definition check: points inside stay bounded, points outside escape",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "0, −1 and i keep the orbit of 0 bounded; 1 and 0.5 send it to infinity."
+    },
+    {
+      "id": "seahorse-check",
+      "title": "Seahorse Valley location check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "The Seahorse point lies outside the main cardioid and outside the period-2 disc, in the neck between them."
+    },
+    {
+      "id": "nucleus-check",
+      "title": "Nucleus check: z returns to 0 after exactly the stated period",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "Each stage with a period is (to double precision) the centre of a copy of the set with that period, and not of any shorter one."
+    },
+    {
+      "id": "period3-check",
+      "title": "Period-3 nucleus check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "The real root of c³ + 2c² + c + 1 = 0 sends 0 back to 0 in three steps."
+    },
+    {
+      "id": "precision",
+      "title": "Magnification check",
+      "publisher": "tests/stages.test.mjs",
+      "url": "tests/stages.test.mjs",
+      "supports": "Each stage's stated magnification matches its span, and the deepest stays within double precision."
+    }
+  ]
+}
