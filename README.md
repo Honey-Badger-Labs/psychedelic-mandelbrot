@@ -15,6 +15,7 @@ A psychedelic deep-zoom journey through five fractals, painted in flowing neon p
 ```sh
 npm run serve        # then open http://localhost:8000
 npm test             # checks the map's arithmetic
+node tools/check-motion.mjs   # with the server running: no jumps, smooth speed, every journey stops on every stage
 ```
 
 **All** (the default) tours every fractal in turn: each journey ends by pulling back to its overview, which dissolves into the next fractal's. Pick one fractal at the top right to loop just that one. Jump straight there with a hash: `#all`, `#julia`, `#ship-cathedral`, `#seahorse` (a Mandelbrot stage).

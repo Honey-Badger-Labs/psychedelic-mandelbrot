@@ -860,7 +860,8 @@ function holdScreen(){
 }
 function releaseScreen(){if(wakeLock){wakeLock.release().catch(function(){});wakeLock=null;}}
 document.addEventListener("visibilitychange",function(){if(!document.hidden&&playing)holdScreen();});
-function stop(){playing=false;phase="moving";playBtn.textContent="Play";releaseScreen();}
+var legFrom=null;
+function stop(){playing=false;phase="moving";legFrom=null;playBtn.textContent="Play";releaseScreen();}
 function setT(v,fromSlider){
   // the journey is a loop: past the last stage it pulls back out and starts again
   T=((v%LAST)+LAST)%LAST;
@@ -871,7 +872,7 @@ slider.addEventListener("input",function(){stop();glideTo=null;setT(parseFloat(s
 slider.addEventListener("change",function(){var r=Math.round(T);if(Math.abs(T-r)<.08)glideTo=r;});
 function toggle(){
   if(playing){stop();return;}
-  playing=true;playBtn.textContent="Pause";holdScreen();
+  playing=true;playBtn.textContent="Pause";holdScreen();legFrom=null;
   var r=Math.round(T)%LAST;
   if(Math.abs(T-Math.round(T))<.01){setT(r);phase="holding";hold=textStage===r?2.5:dwell(r);}
   else phase="moving";
@@ -1278,9 +1279,13 @@ function frame(now){
     else if(phase==="leaving"){hold-=dt;if(hold<=0)phase="moving";}
     else{
       moving=true;
-      var k0=Math.floor(T+1e-9),nt=T+dt/legOf(k0).secs;
-      if(nt>=k0+1){
-        nt=k0+1;phase="holding";hold=dwell((k0+1)%LAST);
+      // which move we are on is remembered, not worked out from T: with fixed steps (a film, or a slow machine
+      // whose frames are all capped at 0.05 s) a move of a whole number of steps sums to 0.9999999999999999,
+      // which rounding took for the stage itself, so the journey sailed through it without stopping
+      if(legFrom===null)legFrom=Math.floor(T+1e-9);
+      var k0=legFrom,nt=T+dt/legOf(k0).secs;
+      if(nt>=k0+1-1e-9){
+        nt=k0+1;phase="holding";hold=dwell((k0+1)%LAST);legFrom=null;
         // back at the overview after the last stage: on a tour, on to the next fractal
         if(tour&&SETS.length>1&&k0+1>=LAST){progress+=nt-T;setT(nt);nextInTour();nt=T;}
       }
