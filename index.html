@@ -1010,11 +1010,11 @@ function saveVideo(blob,url,name){
 // place, fading in and out with the page's text. Recording from a standstill films one whole journey:
 // back to the start, play, and stop by itself after returning to the overview.
 var recCanvas=document.createElement("canvas"),rctx=recCanvas.getContext("2d"),recTitle=0,recJourney=null;
-function recordTitles(dt){
+function recordTitles(dt,fade){
   var e=textStage>=0&&STAGES[textStage],show=e&&read.classList.contains("in")&&!document.body.classList.contains("clean");
   recTitle+=((show?1:0)-recTitle)*Math.min(1,dt*(show?.9:2.5));
   if(recTitle<.01||!e)return;
-  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,x=Math.round(w*.06),a=recTitle*recTitle*(3-2*recTitle);
+  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,x=Math.round(w*.06),a=recTitle*recTitle*(3-2*recTitle)*fade;
   var g=rctx.createLinearGradient(0,h*.55,0,h);g.addColorStop(0,"rgba(6,3,15,0)");g.addColorStop(1,"rgba(6,3,15,"+(.72*a)+")");
   rctx.fillStyle=g;rctx.fillRect(0,h*.55,w,h*.45);
   rctx.globalAlpha=a;rctx.textBaseline="alphabetic";
@@ -1035,20 +1035,50 @@ function recordTitles(dt){
   rctx.fillText(e.title,x,top-110*u);
   rctx.globalAlpha=1;rctx.shadowBlur=0;
 }
+// A filmed journey is a finished piece: black, the name fading in and out over rising sound, the picture fading
+// in on the first stage, one journey with no return to its first words, a rest on the overview, then picture and
+// sound together to black and silence
+var INTRO=6.5,FADE_IN=2.5,REST=4,FADE_OUT=4,BLACK=1.2;
+function recordCard(a){
+  if(a<=0||document.body.classList.contains("clean"))return;
+  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,name=recJourney.name;
+  rctx.save();rctx.globalAlpha=a;rctx.textAlign="center";rctx.textBaseline="middle";
+  rctx.font="italic 500 "+Math.round(120*u)+"px 'Cormorant Garamond', Georgia, serif";
+  var tw=rctx.measureText(name).width,g=rctx.createLinearGradient(w/2-tw/2,0,w/2+tw/2,0);
+  [0,.25,.5,.75,1].forEach(function(k){g.addColorStop(k,palColour("prism",.05+.8*k));});
+  rctx.shadowColor="rgba(255,79,184,.35)";rctx.shadowBlur=40*u;rctx.fillStyle=g;rctx.fillText(name,w/2,h/2);
+  rctx.restore();
+}
 function recordFrame(dt){
   if(!recorder)return;
   if(recCanvas.width!==W||recCanvas.height!==H){recCanvas.width=W;recCanvas.height=H;}
-  rctx.drawImage(canvas,0,0);
-  recordTitles(dt);
-  // a journey ends where it began: back on the overview, rested, with the sound faded. Counted in the page's
-  // own frame time, and the view is held still meanwhile, so a slow machine cannot drift on into another lap
-  if(recJourney&&progress-recJourney.from>=recJourney.stages-1e-6&&phase==="holding"){
-    hold=Math.max(hold,1);
-    recJourney.rest=(recJourney.rest||0)+dt;
-    if(recJourney.rest>7&&!recJourney.ending){recJourney.ending=true;if(SND)SND.setOn(false,4);}
-    if(recJourney.rest>11.5){var r=recorder;recJourney=null;stop();if(r)r.stop();if(SND&&soundOn)SND.setOn(true,2);}
+  var J=recJourney,pic=1,card=0;
+  if(J){
+    J.t+=dt;var t=J.t-J.t0;
+    if(J.step==="intro"){
+      pic=0;card=Math.min(1,Math.max(0,(t-.8)/1.6))*Math.min(1,Math.max(0,(INTRO-.3-t)/1.6));
+      if(t>=INTRO){J.step="in";J.t0=J.t;if(!playing)toggle();}
+    }else if(J.step==="in"){
+      pic=Math.min(1,t/FADE_IN);if(t>=FADE_IN){J.step="run";J.t0=J.t;}
+    }else if(J.step==="run"){
+      // back on the overview after the last stage (the journey is held there, its text kept away)
+      if(J.final&&phase==="holding"){J.step="rest";J.t0=J.t;}
+    }else if(J.step==="rest"){
+      hold=Math.max(hold,1);
+      if(t>=REST){J.step="out";J.t0=J.t;if(SND)SND.fade(false,FADE_OUT);}
+    }else if(J.step==="out"){
+      hold=Math.max(hold,1);pic=Math.max(0,1-t/FADE_OUT);
+      if(t>=FADE_OUT+BLACK){var r=recorder;recJourney=null;stop();if(r)r.stop();if(SND&&soundOn)SND.fade(true,2);}
+    }
+    pic=pic*pic*(3-2*pic);card=card*card*(3-2*card);
   }
+  rctx.globalAlpha=1;rctx.fillStyle="#000";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
+  if(pic>0){rctx.globalAlpha=pic;rctx.drawImage(canvas,0,0);rctx.globalAlpha=1;}
+  recordTitles(dt,pic);
+  if(J&&card>0)recordCard(card);
 }
+// whether a filmed journey is showing its opening card or has come home: the page then keeps stage text away
+function recordQuiet(){return !!recJourney&&(recJourney.step==="intro"||!!recJourney.final);}
 function startRecording(){
   if(!window.MediaRecorder||!recCanvas.captureStream){showToast('<p>This browser cannot record video. Try a current Chrome, Edge, Firefox or Safari.</p><div class="row"><button type="button" data-close>Close</button></div>');return;}
   var journey=!playing;
@@ -1059,7 +1089,11 @@ function startRecording(){
   if(journey){
     if(!soundOn)sndBtn.click();
     if(tour)useSet(SETS[0].id,0);else setT(0);
-    recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST};
+    hideText();recTitle=0;
+    // sound rises from silence under the opening card
+    if(SND){SND.fade(false,.05);setTimeout(function(){if(SND&&recJourney)SND.fade(true,INTRO+FADE_IN-1);},800);}
+    recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST,
+      name:"Psychedelic "+(tour?"Mandelbrot":SET.name),step:"intro",t:0,t0:0,final:false};
   }else recJourney=null;
   recCanvas.width=recSize[0];recCanvas.height=recSize[1];rctx.fillStyle="#06030f";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
   // 30 frames a second (or ?recfps=24): smooth for these slow moves, and half the encoding work of 60,
@@ -1090,7 +1124,7 @@ function startRecording(){
   recorder.start(1000);
   recBtn.classList.add("on");recBtn.textContent="Stop";recBtn.setAttribute("aria-pressed","true");
   // a moment on the first stage, its title arriving, before the journey moves
-  if(journey)setTimeout(function(){if(recorder&&!playing)toggle();},1500);
+  // (a journey starts playing when its opening card has faded: see recordFrame)
 }
 recBtn.addEventListener("click",function(){if(recorder){recorder.stop();return;}startRecording();});
 
@@ -1356,7 +1390,9 @@ function frame(now){
       if(nt>=k0+1-1e-9){
         nt=k0+1;phase="holding";hold=dwell((k0+1)%LAST);legFrom=null;
         // back at the overview after the last stage: on a tour, on to the next fractal
-        if(tour&&SETS.length>1&&k0+1>=LAST){progress+=nt-T;setT(nt);nextInTour();nt=T;}
+        // a filmed journey that has come all the way round stops here: no hand-over to the next fractal
+        if(recJourney&&progress+nt-T-recJourney.from>=recJourney.stages-1e-6)recJourney.final=true;
+        else if(tour&&SETS.length>1&&k0+1>=LAST){progress+=nt-T;setT(nt);nextInTour();nt=T;}
       }
       progress+=nt-T;
       tRate=dt>0?(nt-T)/dt:0;
@@ -1365,7 +1401,7 @@ function frame(now){
   }
   if(STAGES.length){
     var near=Math.round(T)%LAST;
-    if(playing?phase==="holding":Math.abs(T-Math.round(T))<.01)showText(near);else hideText();
+    if(!recordQuiet()&&(playing?phase==="holding":Math.abs(T-Math.round(T))<.01))showText(near);else hideText();
   }
   if(SET){
     var C=camAt(T);

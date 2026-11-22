@@ -142,6 +142,12 @@
         lastSpan = 0;
       },
       setOn: function (on, seconds) { smooth(master.gain, on ? LEVEL : 0, ctx.currentTime, (seconds || 1.6) / 4); },
+      // a straight fade on the audio clock, from where the level is now: films open from and close to silence
+      fade: function (on, seconds) {
+        var now = ctx.currentTime, g = master.gain;
+        g.cancelScheduledValues(now); g.setValueAtTime(g.value, now);
+        g.linearRampToValueAtTime(on ? LEVEL : 0, now + Math.max(0.05, seconds));
+      },
       // call every frame with the journey position and the camera
       update: function (T, C) {
         var now = ctx.currentTime, dt = now - lastUpdate;
