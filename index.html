@@ -155,6 +155,7 @@ body.recording canvas{object-fit:contain;background:#000}
       </div>
       <button id="snd" type="button" aria-pressed="false" title="Sound (M)">Sound</button>
       <button id="txt" type="button" aria-pressed="false" title="Hide or show all text (T)">Text</button>
+      <button id="dev" type="button" aria-pressed="true" title="The Buddhabrot opens grainy and develops, as its paths accumulate. Press to watch it again" hidden>Develop</button>
       <button id="rec" type="button" aria-pressed="false" title="Record a video of the canvas, with sound (R)">Rec</button>
       <button id="info" type="button" aria-pressed="false" title="Show or hide the notes">Info</button>
       <button id="q" type="button" title="Render resolution">Auto</button>
@@ -408,6 +409,7 @@ uniform mat2 uM[6];
 uniform vec2 uOff[6], uSize[6], uRes;
 uniform vec3 uLmin[6], uLmax[6], uLow, uHigh;
 uniform float uOn[6], uGrp[6], uEdge, uGmix, uLiftPx, uTime, uFlow, uGlow;
+uniform float uDev;            // developing: about how many paths have reached the brightest cells so far (0: done)
 out vec4 o;
 `+GLSL_PAL+`
 vec3 acc0, acc1;
@@ -431,7 +433,19 @@ void main(){
   vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
   acc0=vec3(0);acc1=vec3(0);
   layer(0,uT0,fd);layer(1,uT1,fd);layer(2,uT2,fd);layer(3,uT3,fd);layer(4,uT4,fd);layer(5,uT5,fd);
-  vec3 col=paint(mix(acc0,acc1,uGmix))+vec3(.008,.004,.02);
+  vec3 d=mix(acc0,acc1,uGmix);
+  // Developing: the finished density, seen as if only a few paths had been traced so far. A cell expecting n
+  // paths shows n plus counting noise of size sqrt(n) (a fixed draw per cell, so the grain settles rather than
+  // flickers), divided back by the paths so far: grainy and sparse at first, smooth as n grows
+  if(uDev>0.){
+    vec2 r=gl_FragCoord.xy;
+    vec3 u1=fract(sin(vec3(dot(r,vec2(12.9898,78.233)),dot(r,vec2(39.3468,11.135)),dot(r,vec2(73.156,52.235))))*43758.5453);
+    vec3 u2=fract(sin(vec3(dot(r,vec2(93.989,67.345)),dot(r,vec2(17.13,91.71)),dot(r,vec2(45.164,29.94))))*24634.6345);
+    vec3 g=sqrt(-2.*log(max(u1,1e-6)))*cos(6.2831853*u2);
+    vec3 n=d/max(uHigh,vec3(1e-30))*uDev;
+    d=max(n+sqrt(n)*g,0.)/uDev*uHigh;
+  }
+  vec3 col=paint(d)+vec3(.008,.004,.02);
   o=vec4(finish(col,gl_FragCoord.xy,uRes),1.);
 }`;
 
@@ -721,6 +735,12 @@ function buddhaPrefetch(){
   }
 }
 var buddhaReady=true;
+// Develop: the Buddhabrot opens grainy and clears, as if its paths were being traced as you watch (they were
+// traced in advance; this only shows the counting noise of fewer paths, shrinking)
+// Its clock only runs while the images are on screen: started on selection, it could finish while they loaded.
+var DEV_SECS=24,devOn=!/[?&]still/.test(Q),devStart=-1;   // a frozen clock (screenshots) would freeze it half-developed
+function devProgress(){return devStart<0?1:Math.min(1,devStart/DEV_SECS);}
+function startDevelop(){if(devOn&&SET&&SET.kind==="buddha")devStart=0;}
 
 // =====================================================================================================
 // Text, as in The Unfolding: letters arrive one by one, then the note word by word
@@ -861,6 +881,13 @@ function poke(){
   if(document.body.classList.contains("clean"))idleTimer=setTimeout(function(){document.body.classList.add("idle");},2500);
 }
 txtBtn.addEventListener("click",function(){setClean(!document.body.classList.contains("clean"));});
+// Develop: on, it plays whenever the Buddhabrot opens (and now); pressed while developing, it switches off
+var devBtn=document.getElementById("dev");
+devBtn.addEventListener("click",function(){
+  if(devOn&&devProgress()<1){devOn=false;devStart=-1;}
+  else{devOn=true;devStart=0;}
+  devBtn.setAttribute("aria-pressed",String(devOn));
+});
 ["pointermove","pointerdown","keydown"].forEach(function(ev){window.addEventListener(ev,poke,{passive:true});});
 if(/[?&]clean/.test(Q))setClean(true);
 if(FILM)document.body.classList.add("film");
@@ -962,7 +989,7 @@ function recordFrame(dt){
     J.t+=dt;var t=J.t-J.t0;
     if(J.step==="intro"){
       pic=0;card=Math.min(1,Math.max(0,(t-.8)/1.6))*Math.min(1,Math.max(0,(INTRO-.3-t)/1.6));
-      if(t>=INTRO){J.step="in";J.t0=J.t;if(!playing)toggle();}
+      if(t>=INTRO){J.step="in";J.t0=J.t;startDevelop();if(!playing)toggle();}
     }else if(J.step==="in"){
       pic=Math.min(1,t/FADE_IN);if(t>=FADE_IN){J.step="run";J.t0=J.t;}
     }else if(J.step==="run"){
@@ -1059,6 +1086,8 @@ function useSet(id,stageAt){
   front.cam=null;back.active=false;
   markSets();
   document.querySelector(".mark b").textContent="Psychedelic "+set.name;
+  devBtn.hidden=set.kind!=="buddha";devStart=-1;
+  if(set.kind==="buddha")startDevelop();
   if(SND)SND.setVoices(STAGES.map(function(s){return s.sound;}));
   textStage=-2;
   setT(stageAt||0);dirty=true;
@@ -1216,6 +1245,8 @@ function draw(C){
     for(var u=0;u<6;u++)if(!on[u]){gl.activeTexture(gl.TEXTURE2+u);gl.bindTexture(gl.TEXTURE_2D,null);gl.uniform1i(D.u["uT"+u],2+u);}
     gl.uniform1fv(D.u.uOn,on);gl.uniform1fv(D.u.uGrp,grp);gl.uniformMatrix2fv(D.u.uM,false,Ms);gl.uniform2fv(D.u.uOff,offs);gl.uniform2fv(D.u.uSize,sizes);
     gl.uniform3fv(D.u.uLmin,lmin);gl.uniform3fv(D.u.uLmax,lmax);
+    if(devStart>=0&&buddhaReady&&devStart<DEV_SECS)devStart+=lastDt;
+    var dp=devProgress();gl.uniform1f(D.u.uDev,dp<1?3*Math.pow(10,4.3*dp*dp):0);
     gl.uniform1f(D.u.uEdge,BL.edge);gl.uniform1f(D.u.uGmix,two?smoother(C.e):0);
     gl.uniform2f(D.u.uRes,W,H);gl.uniform1f(D.u.uLiftPx,lift*H);
     setPalettes(D,C);
@@ -1291,7 +1322,11 @@ function frame(now){
   }
   var moving=false;tRate=0;
   if(playing&&STAGES.length){
-    if(phase==="holding"){hold-=dt;if(hold<=0){phase="leaving";hold=TEXT_OUT/1000+.3;}}
+    if(phase==="holding"){
+      // a developing Buddhabrot is watched to the end before the journey moves on
+      if(SET.kind==="buddha"&&devProgress()<1)hold=Math.max(hold,(1-devProgress())*DEV_SECS+3);
+      hold-=dt;if(hold<=0){phase="leaving";hold=TEXT_OUT/1000+.3;}
+    }
     else if(phase==="leaving"){hold-=dt;if(hold<=0)phase="moving";}
     else{
       moving=true;
@@ -1331,7 +1366,7 @@ function frame(now){
   if(acc>=1){fpsEl.textContent="prototype 2.0 / "+Math.round(frames/acc)+" fps / "+W+"×"+H;frames=0;acc=0;}
   requestAnimationFrame(frame);
 }
-window.__mandel={get bl(){return BL;},get ready(){return !SET||SET.kind!=="buddha"||buddhaReady;},leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
+window.__mandel={get dev(){return {on:devOn,elapsed:devStart,p:devProgress()};},get bl(){return BL;},get ready(){return !SET||SET.kind!=="buddha"||buddhaReady;},leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
   get playing(){return playing;},get set(){return SET&&SET.id;},stages:function(){return STAGES;},span:0};
 requestAnimationFrame(frame);
 })();
