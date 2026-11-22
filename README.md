@@ -20,6 +20,8 @@ node tools/check-motion.mjs   # with the server running: no jumps, smooth speed,
 
 **All** (the default) tours every fractal in turn: each journey ends by pulling back to its overview, which dissolves into the next fractal's. Pick one fractal at the top right to loop just that one. Jump straight there with a hash: `#all`, `#julia`, `#ship-cathedral`, `#seahorse` (a Mandelbrot stage).
 
+With the Buddhabrot selected, **Develop** (on by default) opens it grainy and lets it clear over about 24 seconds, as if its paths were being traced as you watch; press it again to watch it again, or while developing to switch it off. Recordings follow it.
+
 Keys: Space plays and pauses, M sound, **T no text** (only the picture; the controls fade until you move the pointer), **R record**, arrows step. The journey loops.
 
 ## Recording

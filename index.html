@@ -1324,7 +1324,8 @@ function frame(now){
   if(playing&&STAGES.length){
     if(phase==="holding"){
       // a developing Buddhabrot is watched to the end before the journey moves on
-      if(SET.kind==="buddha"&&devProgress()<1)hold=Math.max(hold,(1-devProgress())*DEV_SECS+3);
+      // (only while its images are on screen: if they never load, the journey must not wait for ever)
+      if(SET.kind==="buddha"&&buddhaReady&&devProgress()<1)hold=Math.max(hold,(1-devProgress())*DEV_SECS+3);
       hold-=dt;if(hold<=0){phase="leaving";hold=TEXT_OUT/1000+.3;}
     }
     else if(phase==="leaving"){hold-=dt;if(hold<=0)phase="moving";}
