@@ -8,7 +8,7 @@ A psychedelic deep-zoom journey through five fractals, painted in flowing neon p
 | **Julia** | One formula, five constants: the rabbit, a golden whirlpool, lightning, spirals, near-dust. The shape melts from one to the next | 5 |
 | **Burning Ship** | The Mandelbrot formula with a fold: hulls, masts and a Gothic cathedral of rigging | 4 |
 | **Mandelbulb** | A 3D cousin, ray-marched and lit, its power melting from 8 to 4 | 3 |
-| **Buddhabrot** | The paths of escaping points, traced live on every core; it develops like a photograph, then dives down its spine to a small Buddha, 86 × closer | 7 |
+| **Buddhabrot** | The paths of escaping points, traced in advance from billions of paths; it dives down its spine to a small Buddha, 86 × closer | 7 |
 
 ## Run it
 
@@ -41,9 +41,8 @@ Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=�
 - **`index.html`** is the whole renderer: WebGL2, no build step, no dependencies.
   - **Escape-time sets** (Mandelbrot, Julia, Burning Ship) use two passes. *Iterate*: float32 runs out of digits at about 10⁵ magnification, so the page uses *perturbation*: JS computes one reference orbit at the centre in double precision, and each pixel iterates only its tiny offset from it. When a pixel's orbit comes closer to the reference's start than its own offset, it *rebases*, which removes the classic glitches. The Burning Ship's fold is perturbed with "diffabs". This reaches about 10¹³. *Colour*: cosine palettes, a slowly circling light, neon glow on the filaments; cheap, so colours flow while the view rests.
   - **Mandelbulb**: ray-marched with its distance estimate, ambient occlusion and a rim light, coloured by an orbit trap.
-  - **Buddhabrot**: a Web Worker traces random escaping orbits and counts the pixels they cross, at three iteration limits; the shader paints the three counts in three palette colours.
+  - **Buddhabrot**: traced in advance by `tools/buddha-render.mjs` into a stack of images (one per stage, more along the long zooms), stored as path density; the page zooms and pans through them, blending the sharpest available, with colour and exposure live.
   - **Motion**: zooms move at a steady speed in log-scale, easing in and out over a few seconds. A deep view can take a GPU longer than one frame to compute, so it is computed a strip at a time for where the camera *will* be, while every frame shows the last finished view moved, scaled and turned to where the camera *is*. The picture moves at the screen's full frame rate however heavy the maths. Auto resolution only changes while the view rests.
-  - **Buddhabrot zoom**: the old exposure is carried along and fades while the next view develops underneath. Small windows are sampled with Metropolis-Hastings (nudge paths that crossed the window, weight each by 1 / cells crossed), which gives the same picture as random sampling far sooner, on one worker per spare core.
 - **`audio.js`**: one live-generated voice per stage, crossfaded, over a Shepard-Risset glissando driven by the zoom speed.
 - **`data/sets.json`** is the map: each set, and for each stage its place, depth, rotation, iteration limit, palette, voice and text.
 - **`data/sources.json`** says which check backs each claim. There are no outside sources: see [docs/maths-policy.md](docs/maths-policy.md).

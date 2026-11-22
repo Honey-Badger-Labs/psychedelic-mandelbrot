@@ -167,3 +167,26 @@ test("Buddhabrot: the stated limits are the ones used", () => {
     assert.match(s.note, new RegExp(`${r} steps, green ${g}, blue ${b}`));
   }
 });
+
+test("Buddhabrot: every stage has its traced image, framed for it, and the notes do not claim live tracing", () => {
+  const m = JSON.parse(read("data/buddha/layers.json"));
+  const stages = sets.find((x) => x.id === "buddha").stages;
+  let bytes = 0;
+  for (const l of m.layers) {
+    const size = readFileSync(new URL("data/buddha/" + l.file, root)).length;
+    assert.ok(size < 16e6, `${l.file} is ${size} bytes; keep each image under 16 MB`);
+    bytes += size;
+    assert.ok(m.encoding[l.group], `no brightness scale for group ${l.group}`);
+  }
+  assert.ok(bytes < 60e6, `the images total ${(bytes / 1e6).toFixed(1)} MB; keep them under 60 MB`);
+  for (const s of stages) {
+    const l = m.layers.find((x) => x.kind === "stage" && x.stage === s.id);
+    assert.ok(l, `${s.id}: no stage image`);
+    assert.ok(Math.abs(l.re - s.re) < 1e-9 && Math.abs(l.im - s.im) < 1e-9, `${s.id}: image not centred on the stage`);
+    assert.ok(l.hc >= s.span * 1.6, `${s.id}: image does not frame the view`);
+    assert.equal(l.group, s.limits.join("/"));
+    const info = m.stages[s.id];
+    assert.ok(info && info.paths > 0 && info.low.every((v, c) => v < info.high[c]), `${s.id}: no exposure`);
+    assert.doesNotMatch(s.note, /as you watch|being traced/, `${s.id}: the page no longer traces live`);
+  }
+});

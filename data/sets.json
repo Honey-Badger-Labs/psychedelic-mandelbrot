@@ -621,7 +621,7 @@
           "sound": "spiral",
           "place": "paths of escaping points",
           "scale": "magnified 2 times",
-          "note": "Twice as close. Paths that cross a small window are found by nudging ones that already did, then weighted so the picture matches plain random sampling, only sooner."
+          "note": "Twice as close. Paths that cross a small window are found by nudging ones that already did, then weighted so the picture matches plain random sampling."
         },
         {
           "pace": 1,
@@ -649,7 +649,7 @@
           "sound": "tendril",
           "place": "paths of escaping points",
           "scale": "magnified 3 times",
-          "note": "Further along the figure. Every glowing thread here is thousands of escaping paths laid on top of one another, still being traced as you watch."
+          "note": "Further along the figure. Every glowing thread here is thousands of escaping paths laid on top of one another."
         },
         {
           "pace": 1,
@@ -732,7 +732,7 @@
           "palette": "aurora",
           "sound": "minibrot",
           "scale": "magnified 86 times",
-          "note": "Eighty-six times closer, down the spine, sits a smaller figure with the shape of the whole, still being traced as you watch.",
+          "note": "Eighty-six times closer, down the spine, sits a smaller figure with the shape of the whole, glowing in the dark.",
           "stage": 5
         },
         {
