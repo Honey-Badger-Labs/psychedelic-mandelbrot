@@ -964,7 +964,10 @@ if(FILM)document.body.classList.add("film");
 var sndBtn=document.getElementById("snd"),AC=null,SND=null,soundOn=false,soundOut=null,recDest=null;
 function ensureAudio(){
   if(AC)return;
-  var Ctx=window.AudioContext||window.webkitAudioContext;try{AC=new Ctx({latencyHint:"playback"});}catch(e){AC=new Ctx();}
+  // a generous output buffer (a fifth of a second): nothing here needs quick response, and the extra slack keeps
+  // the sound whole while the same machine draws fractals and traces paths
+  var Ctx=window.AudioContext||window.webkitAudioContext;
+  try{AC=new Ctx({latencyHint:.2});}catch(e){try{AC=new Ctx({latencyHint:"playback"});}catch(e2){AC=new Ctx();}}
   soundOut=AC.createGain();soundOut.connect(AC.destination);
   SND=createSoundtrack(AC,soundOut,STAGES.map(function(s){return s.sound;}));
 }
