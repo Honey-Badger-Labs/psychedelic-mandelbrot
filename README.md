@@ -27,7 +27,7 @@ Keys: Space plays and pauses, M sound, **T no text** (only the picture; the cont
 **Rec (the way to make the films).** On a computer with a graphics card (any recent Mac), the page draws in real time, so it can film itself:
 
 1. Choose **All** for the whole tour, or one fractal for its journey alone. Leave it stopped.
-2. Press **Rec** (or R). It goes back to the start, turns the sound on, plays the journey once, and stops by itself back on the overview, with the sound faded out.
+2. Press **Rec** (or R). The film opens on black: the name (*Psychedelic Mandelbrot*, or *Psychedelic Julia* and so on for one fractal) fades in and out as the sound rises from silence. Then the picture fades in on the first stage, the journey plays once, rests on the overview without returning to its first words (a tour does not dissolve back into the first fractal), and picture and sound fade together to black and silence. It stops by itself.
 3. Press **Save video**.
 
 Films are 1920 × 1080 (1080 × 1920 if the window is taller than it is wide, or with `?vertical`), whatever the window size, with each stage's title, place and note fading in and out as on the page. Press **Text** first for a film with no words at all. Pressing Rec while a journey is already playing records from that moment until you press Stop. The whole tour is about 15 minutes; Mandelbrot alone about 6.

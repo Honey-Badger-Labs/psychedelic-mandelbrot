@@ -410,28 +410,33 @@ uniform vec3 uLowA, uLowB;
 uniform float uWA, uWB, uLiftPx, uTime, uFlow, uGlow;
 out vec4 o;
 `+GLSL_PAL+`
-vec3 counts(highp sampler2D h,vec2 q,vec2 size){
+// the counts at q, and in .a how far inside the traced window q lies (0 outside, rising over a soft edge to 1)
+vec4 counts(highp sampler2D h,vec2 q,vec2 size){
   // bilinear by hand (float textures cannot always be filtered), so a magnified exposure stays smooth
   vec2 x=q-.5,f=fract(x); ivec2 i=ivec2(floor(x)),m=ivec2(size)-1;
   // soft edges, so the end of a traced window never shows as a line
   vec2 edge=min(q,size-q)/(.22*size);
   float soft=smoothstep(0.,1.,clamp(min(edge.x,edge.y),0.,1.));
-  if(soft<=0.)return vec3(0);
+  if(soft<=0.)return vec4(0);
   vec3 a=texelFetch(h,clamp(i,ivec2(0),m),0).rgb,b=texelFetch(h,clamp(i+ivec2(1,0),ivec2(0),m),0).rgb;
   vec3 c=texelFetch(h,clamp(i+ivec2(0,1),ivec2(0),m),0).rgb,d=texelFetch(h,clamp(i+ivec2(1,1),ivec2(0),m),0).rgb;
-  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y)*soft;
+  return vec4(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),soft);
 }
 vec3 paint(vec3 h,vec3 low,vec3 norm){
   vec3 v=clamp(pow(max(h-low,0.)*norm,vec3(.6)),0.,1.2);
   float t=-uTime*uFlow;
   vec3 col=v.r*palette(t)+v.g*palette(t+.33)*.9+v.b*palette(t+.66)*.8;
-  return col+pow(v.r*v.g*v.b,1.5)*uGlow*.6;
+  return (col+pow(v.r*v.g*v.b,1.5)*uGlow*.6)*.8;
 }
 void main(){
   vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
   vec3 col=vec3(0);
-  if(uWA>0.)col+=paint(counts(uHistA,uMA*fd+uOffA,uSizeA),uLowA,uNormA)*uWA;
-  if(uWB>0.)col+=paint(counts(uHistB,uMB*fd+uOffB,uSizeB),uLowB,uNormB)*uWB;
+  // blended pixel by pixel: the next view shows wherever it has picture, through a soft edge, and the view we
+  // are leaving fills the rest, so the hand-over moves across the screen with the zoom instead of popping
+  vec4 a=uWA>0.?counts(uHistA,uMA*fd+uOffA,uSizeA):vec4(0),b=uWB>0.?counts(uHistB,uMB*fd+uOffB,uSizeB):vec4(0);
+  float tb=uWB*b.a;
+  if(uWA>0.)col+=paint(a.rgb,uLowA,uNormA)*a.a*uWA*(1.-tb);
+  if(uWB>0.)col+=paint(b.rgb,uLowB,uNormB)*tb;
   col+=vec3(.008,.004,.02);
   o=vec4(finish(col,gl_FragCoord.xy,uRes),1.);
 }`;
@@ -649,9 +654,13 @@ function camAt(T){
     C.stageA=k%n;C.stageB=(k+1)%n;C.stage=fr>0?C.stageB:C.stageA;C.limits=STAGES[C.stage].limits;
     // each exposure shows only once it covers the screen (a window still smaller than the view would show as a
     // box), and the one we leave gives way as the next takes over
-    var coverA=Math.min(1,A.span*1.3/sp),coverB=Math.min(1,B.span*1.3/sp);
-    C.wB=fr<=0?0:smoother((coverB-.55)/.4)*smoother((fr-.04)/.45);
-    C.wA=fr<=0?1:(1-C.wB)*smoother((coverA-.4)/.45);
+    // how far into the move the next exposure is allowed to take over; draw() weighs it by how much of the
+    // screen it really covers (which also keeps the one we leave until the next fills the screen)
+    // pulling back, the wider view takes over early and the one we leave dissolves as it shrinks (wA below);
+    // diving, the next view comes in across the move
+    var out=B.span>A.span*1.01;
+    C.tB=fr<=0?0:smoother((fr-.02)/(out?.3:.55));
+    C.fadeA=out?smoother((A.span*1.35/sp-.75)/.6):1;
     C.mix=e;
   }
   C.flow=lerp(A.flow,B.flow,C.mix);C.density=lerp(A.density,B.density,C.mix);C.glow=lerp(A.glow,B.glow,C.mix);
@@ -755,8 +764,10 @@ function buddhaKey(st){return [SET.id,st,W,H,lift].join(",");}
 function slotFor(key){for(var i=0;i<2;i++)if(buddha.slots[i].key===key)return buddha.slots[i];return null;}
 function buddhaStart(stage,keep){
   var S=STAGES[stage],key=buddhaKey(stage);
-  // reuse the slot not showing the view we are leaving
-  var i=buddha.slots[0].key===keep?1:0,slot=buddha.slots[i];
+  // a view already developing carries on where it is (restarting it threw away seconds of tracing)
+  var have=slotFor(key);
+  // otherwise reuse the slot not showing the view we are leaving
+  var i=have?buddha.slots.indexOf(have):buddha.slots[0].key===keep?1:0,slot=buddha.slots[i];
   // traced a little wider than the view, so the zoom towards it has picture at the edges; at most about
   // 1.2 million cells (the shader smooths them), so adding up every worker's counts stays cheap at full HD
   // a zoomed window gets a coarser grid: every cell then collects more paths, which halves the grain, and
@@ -765,10 +776,12 @@ function buddhaStart(stage,keep){
   var w=Math.max(64,Math.round(W*1.35*hs)),h=Math.max(64,Math.round(H*1.35*hs)),rot=S.turn*Math.PI/180;
   var pix=S.span/Math.max(1,Math.min(W,H))/hs;
   var p={w:w,h:h,re:S.re,im:S.im,span:S.span,pix:pix,cos:Math.cos(rot),sin:Math.sin(rot),limits:S.limits,lift:lift*H*hs,seed:7+stage,key:key,slot:i};
-  slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1,0,0,0];slot.traced=0;
-  slot.acc=new Float32Array(w*h*4);slot.dirty=false;slot.up=0;slot.lv=0;
-  gl.bindTexture(gl.TEXTURE_2D,slot.tex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,slot.acc);
+  if(!have){
+    slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1,0,0,0];slot.traced=0;
+    slot.acc=new Float32Array(w*h*4);slot.dirty=false;slot.up=0;slot.lv=0;slot.shown=null;
+    gl.bindTexture(gl.TEXTURE_2D,slot.tex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,slot.acc);
+  }else p.seed+=slot.traced%9973;   // fresh random numbers for the paths still to come
   buddha.key=key;buddha.tracing=i;
   if(FILM||!window.Worker){buddha.local=buddha.local||buddhaTracer();buddha.local.start(p);return;}
   if(!buddha.workers){
@@ -1010,11 +1023,11 @@ function saveVideo(blob,url,name){
 // place, fading in and out with the page's text. Recording from a standstill films one whole journey:
 // back to the start, play, and stop by itself after returning to the overview.
 var recCanvas=document.createElement("canvas"),rctx=recCanvas.getContext("2d"),recTitle=0,recJourney=null;
-function recordTitles(dt){
+function recordTitles(dt,fade){
   var e=textStage>=0&&STAGES[textStage],show=e&&read.classList.contains("in")&&!document.body.classList.contains("clean");
   recTitle+=((show?1:0)-recTitle)*Math.min(1,dt*(show?.9:2.5));
   if(recTitle<.01||!e)return;
-  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,x=Math.round(w*.06),a=recTitle*recTitle*(3-2*recTitle);
+  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,x=Math.round(w*.06),a=recTitle*recTitle*(3-2*recTitle)*fade;
   var g=rctx.createLinearGradient(0,h*.55,0,h);g.addColorStop(0,"rgba(6,3,15,0)");g.addColorStop(1,"rgba(6,3,15,"+(.72*a)+")");
   rctx.fillStyle=g;rctx.fillRect(0,h*.55,w,h*.45);
   rctx.globalAlpha=a;rctx.textBaseline="alphabetic";
@@ -1035,20 +1048,50 @@ function recordTitles(dt){
   rctx.fillText(e.title,x,top-110*u);
   rctx.globalAlpha=1;rctx.shadowBlur=0;
 }
+// A filmed journey is a finished piece: black, the name fading in and out over rising sound, the picture fading
+// in on the first stage, one journey with no return to its first words, a rest on the overview, then picture and
+// sound together to black and silence
+var INTRO=6.5,FADE_IN=2.5,REST=4,FADE_OUT=4,BLACK=1.2;
+function recordCard(a){
+  if(a<=0||document.body.classList.contains("clean"))return;
+  var w=recCanvas.width,h=recCanvas.height,u=Math.min(w,h)/1080,name=recJourney.name;
+  rctx.save();rctx.globalAlpha=a;rctx.textAlign="center";rctx.textBaseline="middle";
+  rctx.font="italic 500 "+Math.round(120*u)+"px 'Cormorant Garamond', Georgia, serif";
+  var tw=rctx.measureText(name).width,g=rctx.createLinearGradient(w/2-tw/2,0,w/2+tw/2,0);
+  [0,.25,.5,.75,1].forEach(function(k){g.addColorStop(k,palColour("prism",.05+.8*k));});
+  rctx.shadowColor="rgba(255,79,184,.35)";rctx.shadowBlur=40*u;rctx.fillStyle=g;rctx.fillText(name,w/2,h/2);
+  rctx.restore();
+}
 function recordFrame(dt){
   if(!recorder)return;
   if(recCanvas.width!==W||recCanvas.height!==H){recCanvas.width=W;recCanvas.height=H;}
-  rctx.drawImage(canvas,0,0);
-  recordTitles(dt);
-  // a journey ends where it began: back on the overview, rested, with the sound faded. Counted in the page's
-  // own frame time, and the view is held still meanwhile, so a slow machine cannot drift on into another lap
-  if(recJourney&&progress-recJourney.from>=recJourney.stages-1e-6&&phase==="holding"){
-    hold=Math.max(hold,1);
-    recJourney.rest=(recJourney.rest||0)+dt;
-    if(recJourney.rest>7&&!recJourney.ending){recJourney.ending=true;if(SND)SND.setOn(false,4);}
-    if(recJourney.rest>11.5){var r=recorder;recJourney=null;stop();if(r)r.stop();if(SND&&soundOn)SND.setOn(true,2);}
+  var J=recJourney,pic=1,card=0;
+  if(J){
+    J.t+=dt;var t=J.t-J.t0;
+    if(J.step==="intro"){
+      pic=0;card=Math.min(1,Math.max(0,(t-.8)/1.6))*Math.min(1,Math.max(0,(INTRO-.3-t)/1.6));
+      if(t>=INTRO){J.step="in";J.t0=J.t;if(!playing)toggle();}
+    }else if(J.step==="in"){
+      pic=Math.min(1,t/FADE_IN);if(t>=FADE_IN){J.step="run";J.t0=J.t;}
+    }else if(J.step==="run"){
+      // back on the overview after the last stage (the journey is held there, its text kept away)
+      if(J.final&&phase==="holding"){J.step="rest";J.t0=J.t;}
+    }else if(J.step==="rest"){
+      hold=Math.max(hold,1);
+      if(t>=REST){J.step="out";J.t0=J.t;if(SND)SND.fade(false,FADE_OUT);}
+    }else if(J.step==="out"){
+      hold=Math.max(hold,1);pic=Math.max(0,1-t/FADE_OUT);
+      if(t>=FADE_OUT+BLACK){var r=recorder;recJourney=null;stop();if(r)r.stop();if(SND&&soundOn)SND.fade(true,2);}
+    }
+    pic=pic*pic*(3-2*pic);card=card*card*(3-2*card);
   }
+  rctx.globalAlpha=1;rctx.fillStyle="#000";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
+  if(pic>0){rctx.globalAlpha=pic;rctx.drawImage(canvas,0,0);rctx.globalAlpha=1;}
+  recordTitles(dt,pic);
+  if(J&&card>0)recordCard(card);
 }
+// whether a filmed journey is showing its opening card or has come home: the page then keeps stage text away
+function recordQuiet(){return !!recJourney&&(recJourney.step==="intro"||!!recJourney.final);}
 function startRecording(){
   if(!window.MediaRecorder||!recCanvas.captureStream){showToast('<p>This browser cannot record video. Try a current Chrome, Edge, Firefox or Safari.</p><div class="row"><button type="button" data-close>Close</button></div>');return;}
   var journey=!playing;
@@ -1059,7 +1102,11 @@ function startRecording(){
   if(journey){
     if(!soundOn)sndBtn.click();
     if(tour)useSet(SETS[0].id,0);else setT(0);
-    recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST};
+    hideText();recTitle=0;
+    // sound rises from silence under the opening card
+    if(SND){SND.fade(false,.05);setTimeout(function(){if(SND&&recJourney)SND.fade(true,INTRO+FADE_IN-1);},800);}
+    recJourney={from:progress,stages:tour?SETS.reduce(function(n,s){return n+s.stages.length;},0):LAST,
+      name:"Psychedelic "+(tour?"Mandelbrot":SET.name),step:"intro",t:0,t0:0,final:false};
   }else recJourney=null;
   recCanvas.width=recSize[0];recCanvas.height=recSize[1];rctx.fillStyle="#06030f";rctx.fillRect(0,0,recCanvas.width,recCanvas.height);
   // 30 frames a second (or ?recfps=24): smooth for these slow moves, and half the encoding work of 60,
@@ -1090,7 +1137,7 @@ function startRecording(){
   recorder.start(1000);
   recBtn.classList.add("on");recBtn.textContent="Stop";recBtn.setAttribute("aria-pressed","true");
   // a moment on the first stage, its title arriving, before the journey moves
-  if(journey)setTimeout(function(){if(recorder&&!playing)toggle();},1500);
+  // (a journey starts playing when its opening card has faded: see recordFrame)
 }
 recBtn.addEventListener("click",function(){if(recorder){recorder.stop();return;}startRecording();});
 
@@ -1249,13 +1296,21 @@ function draw(C){
     gl.uniform2f(B.u.uRes,W,H);gl.uniform1f(B.u.uLift,lift*H);
     gl.drawArrays(gl.TRIANGLES,0,3);
   }else{
-    var want=buddhaKey(C.stage);
-    if(want!==buddha.key)buddhaStart(C.stage,C.stage===C.stageB?buddhaKey(C.stageA):"");
+    // the next view starts developing halfway through the rest on this one (or as its words leave), so it is
+    // already well formed when the move begins; it used to start from nothing at the first step of the move
+    var traceStage=C.stage;
+    if(C.fr<=0&&playing&&!(recJourney&&recJourney.final)&&!(phase==="holding"&&hold>=dwell(C.stageA)*.5))traceStage=C.stageB;
+    var want=buddhaKey(traceStage);
+    if(want!==buddha.key)buddhaStart(traceStage,traceStage!==C.stageA?buddhaKey(C.stageA):"");
     if(buddha.local&&(FILM||!buddha.workers))buddhaLocalStep();
     buddhaUpload();
     var D=program("buddha");gl.useProgram(D.p);
-    var layers=[["A",slotFor(buddhaKey(C.stageA)),C.wA],["B",C.wB>0?slotFor(buddhaKey(C.stageB)):null,C.wB]];
-    var cpix=C.span/Math.min(W,H);
+    var cpix=C.span/Math.min(W,H),sA=slotFor(buddhaKey(C.stageA)),sB=C.tB>0?slotFor(buddhaKey(C.stageB)):null;
+    // coverage is handled pixel by pixel in the shader (each window's soft edge). Weighting the whole view by
+    // how much of the screen it covered drew a resting view at under half strength (the screen's corners sit in
+    // its soft edge), so every arrival popped darker
+    var wB=sB?C.tB:0,wA=sA?(C.fadeA===undefined?1:C.fadeA):0;
+    var layers=[["A",sA,wA],["B",sB,wB]];
     layers.forEach(function(L,n){
       var sl=L[1],X=L[0];
       gl.uniform1f(D.u["uW"+X],sl?L[2]:0);
@@ -1266,7 +1321,10 @@ function draw(C){
       gl.uniformMatrix2fv(D.u["uM"+X],false,[ca,sa,-sa,ca]);
       gl.uniform2f(D.u["uOff"+X],(cf*dr-sf*di)/hc.pix+hc.w/2,(sf*dr+cf*di)/hc.pix+hc.h/2+hc.lift);
       gl.uniform2f(D.u["uSize"+X],hc.w,hc.h);
-      var lv=sl.levels;
+      // exposure glides towards each new reading instead of jumping (it showed as a brightness pop)
+      if(!sl.shown||sl.shown.key!==sl.key){sl.shown=sl.levels.slice();sl.shown.key=sl.key;}
+      for(var q=0;q<6;q++)sl.shown[q]+=(sl.levels[q]-sl.shown[q])*Math.min(1,lastDt*1.2);
+      var lv=sl.shown;
       gl.uniform3f(D.u["uNorm"+X],1/Math.max(1e-9,lv[0]-(lv[3]||0)),1/Math.max(1e-9,lv[1]-(lv[4]||0)),1/Math.max(1e-9,lv[2]-(lv[5]||0)));
       gl.uniform3f(D.u["uLow"+X],lv[3]||0,lv[4]||0,lv[5]||0);
     });
@@ -1356,7 +1414,9 @@ function frame(now){
       if(nt>=k0+1-1e-9){
         nt=k0+1;phase="holding";hold=dwell((k0+1)%LAST);legFrom=null;
         // back at the overview after the last stage: on a tour, on to the next fractal
-        if(tour&&SETS.length>1&&k0+1>=LAST){progress+=nt-T;setT(nt);nextInTour();nt=T;}
+        // a filmed journey that has come all the way round stops here: no hand-over to the next fractal
+        if(recJourney&&progress+nt-T-recJourney.from>=recJourney.stages-1e-6)recJourney.final=true;
+        else if(tour&&SETS.length>1&&k0+1>=LAST){progress+=nt-T;setT(nt);nextInTour();nt=T;}
       }
       progress+=nt-T;
       tRate=dt>0?(nt-T)/dt:0;
@@ -1365,7 +1425,7 @@ function frame(now){
   }
   if(STAGES.length){
     var near=Math.round(T)%LAST;
-    if(playing?phase==="holding":Math.abs(T-Math.round(T))<.01)showText(near);else hideText();
+    if(!recordQuiet()&&(playing?phase==="holding":Math.abs(T-Math.round(T))<.01))showText(near);else hideText();
   }
   if(SET){
     var C=camAt(T);
@@ -1382,7 +1442,7 @@ function frame(now){
   if(acc>=1){fpsEl.textContent="prototype 2.0 / "+Math.round(frames/acc)+" fps / "+W+"×"+H;frames=0;acc=0;}
   requestAnimationFrame(frame);
 }
-window.__mandel={leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
+window.__mandel={bslots:function(){return buddha.slots.map(function(x){return {key:x.key,traced:x.traced};}).concat([buddha.key]);},leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
   get playing(){return playing;},get set(){return SET&&SET.id;},stages:function(){return STAGES;},span:0};
 requestAnimationFrame(frame);
 })();
