@@ -1,0 +1,71 @@
+# Traces the Buddhabrot on GitHub's machines (no graphics card needed: it is all arithmetic on the processor).
+# Start it by hand: Actions > "Buddhabrot" > "Run workflow".
+#
+#   images: re-traces the stack of images the page zooms through (data/buddha/), at the times below per image,
+#           runs the tests, and opens a pull request with the new images. About 3 hours at the defaults.
+#   poster: a finished, coloured still of the whole figure (8K by default), under the run's Artifacts.
+#           Runs alongside the images, so both finish in about 3 hours.
+#
+# For the pull request, the repository must allow it: Settings > Actions > General > Workflow permissions >
+# "Allow GitHub Actions to create and approve pull requests". Without that the new images are still pushed to
+# a branch named buddha-images-<run number>, and you can open the pull request yourself.
+name: Buddhabrot
+on:
+  workflow_dispatch:
+    inputs:
+      images: { description: "Re-trace the page's images and open a pull request", type: boolean, default: true }
+      whole: { description: "Seconds of tracing per whole-figure image", default: "600" }
+      zoom: { description: "Seconds per zoomed stage image", default: "900" }
+      between: { description: "Seconds per in-between image", default: "450" }
+      poster: { description: "Make a full-quality still of the whole figure", type: boolean, default: true }
+      poster_stage: { description: "buddha (5,000 / 500 / 50 steps) or deep (20,000 / 2,000 / 200)", default: "buddha" }
+      poster_size: { description: "Poster size in pixels", default: "7680x4320" }
+      poster_minutes: { description: "Minutes of tracing for the poster", default: "60" }
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  images:
+    if: inputs.images
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: python3 -m pip install --quiet pillow
+      - name: Trace
+        run: node tools/buddha-render.mjs --whole ${{ inputs.whole }} --zoom ${{ inputs.zoom }} --between ${{ inputs.between }}
+      - run: npm test
+      - name: Pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="buddha-images-${{ github.run_number }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add data/buddha
+          git commit -m "Re-trace the Buddhabrot images" -m "Traced by the Buddhabrot workflow (run ${{ github.run_number }}): ${{ inputs.whole }} s per whole-figure image, ${{ inputs.zoom }} s per zoomed stage, ${{ inputs.between }} s per in-between image, on every core."
+          git push origin "$BRANCH"
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
+            --title "Re-trace the Buddhabrot images (run ${{ github.run_number }})" \
+            --body "New images for the page, traced by the Buddhabrot workflow with ${{ inputs.whole }} / ${{ inputs.zoom }} / ${{ inputs.between }} seconds per whole / zoomed / in-between image. The tests passed on them. Paths traced per stage are in data/buddha/layers.json." \
+            || echo "::warning::Could not open the pull request (see the note at the top of this workflow). The images are on branch $BRANCH."
+  poster:
+    if: inputs.poster
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: python3 -m pip install --quiet pillow
+      - name: Trace and colour
+        run: node tools/buddha-poster.mjs --stage ${{ inputs.poster_stage }} --size ${{ inputs.poster_size }} --minutes ${{ inputs.poster_minutes }} --out posters
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buddhabrot-poster-${{ inputs.poster_stage }}-${{ inputs.poster_size }}
+          path: posters/*.png
+          compression-level: 0
+          retention-days: 30

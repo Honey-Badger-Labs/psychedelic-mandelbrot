@@ -36,6 +36,10 @@ Films are 1920 × 1080 (1080 × 1920 if the window is taller than it is wide, or
 
 Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=…&span=…` overrides that stage's view (for finding new places), `?scale=1` fixes the resolution, `?still` freezes the colour flow, `?clean` hides the text, `?autoplay` starts playing.
 
+## The Buddhabrot's images
+
+The Buddhabrot is traced in advance, not live. To trace it again at higher quality, or after changing a Buddhabrot stage, run **Actions → Buddhabrot → Run workflow**: it re-traces every image (about 3 hours at the defaults, on GitHub's machines, at no cost), runs the tests and opens a pull request with the new images. The same run can make a **poster**: a finished, coloured still of the whole figure at 8K, traced for an hour, under the run's Artifacts. Locally: `node tools/buddha-render.mjs` and `node tools/buddha-poster.mjs` (Node and Python with Pillow).
+
 ## How it is built
 
 - **`index.html`** is the whole renderer: WebGL2, no build step, no dependencies.

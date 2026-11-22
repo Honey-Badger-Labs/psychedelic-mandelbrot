@@ -17,7 +17,8 @@ export function createTracer(p) {
   const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
   const L = Math.max(...p.limits), lim = p.limits, minK = p.minK || 12;
   const cos = Math.cos(p.rot), sin = Math.sin(p.rot), w = p.w, h = p.h;
-  const hist = new Float64Array(w * h * 3);
+  // posters are big: 32-bit counts there (exact to 16 million per cell), 64-bit otherwise
+  const hist = p.f32 ? new Float32Array(w * h * 3) : new Float64Array(w * h * 3);
   const ox = new Float64Array(L + 1), oy = new Float64Array(L + 1);
   const mk = () => ({ idx: new Int32Array(2 * L + 2), n: 0, k: 0, cr: 0, ci: 0 });
   let cur = mk(), tmp = mk(), samples = 0;
