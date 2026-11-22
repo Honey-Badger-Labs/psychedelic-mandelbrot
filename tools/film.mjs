@@ -131,6 +131,8 @@ for (;;) {
   const time = frame / FPS;
   if (!started && time >= HEAD) { await page.evaluate(() => document.getElementById("play").click()); started = true; }
   await step(1000 / FPS);
+  // the Buddhabrot's images load over the network: a frame waits for the ones it needs
+  await page.waitForFunction(() => window.__mandel.ready, null, { timeout: 120000 });
   const s = await page.evaluate(() => ({ T: window.__mandel.T, span: window.__mandel.span, progress: window.__mandel.progress, phase: window.__mandel.phase, set: window.__mandel.set }));
   track.push([s.T, s.span, s.set]);
   const shot = await cdp.send("Page.captureScreenshot", { format: "png", optimizeForSpeed: true });

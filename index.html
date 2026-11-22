@@ -398,46 +398,40 @@ void main(){
 
 // ---------- the Buddhabrot: the paths of escaping points, counted per pixel (on the CPU), then coloured
 // here. Three counts, for three iteration limits, each painted with its own colour from the palette.
+// ---------- the Buddhabrot: traced in advance (tools/buddha-render.mjs) as a stack of images of path density,
+// stored as logarithms. Up to three images per group of iteration limits are laid coarse to fine, each through
+// its own soft edge, and the two groups are mixed when a move changes the limits. Exposure and colour are live.
 var FS_BUDDHA=`#version 300 es
 precision highp float;
-// two exposures: the view we are leaving (A) and the one developing (B), each traced for its own camera and
-// moved, scaled and turned here to the camera of this frame, so a change of view is a zoom, not a cut
-uniform highp sampler2D uHistA, uHistB;
-uniform mat2 uMA, uMB;
-uniform vec2 uOffA, uOffB, uSizeA, uSizeB, uRes;
-uniform vec3 uNormA, uNormB;   // 1 / (high - low percentile) of each count, so a picture keeps its exposure as it fills
-uniform vec3 uLowA, uLowB;
-uniform float uWA, uWB, uLiftPx, uTime, uFlow, uGlow;
+uniform highp sampler2D uT0, uT1, uT2, uT3, uT4, uT5;
+uniform mat2 uM[6];
+uniform vec2 uOff[6], uSize[6], uRes;
+uniform vec3 uLmin[6], uLmax[6], uLow, uHigh;
+uniform float uOn[6], uGrp[6], uEdge, uGmix, uLiftPx, uTime, uFlow, uGlow;
 out vec4 o;
 `+GLSL_PAL+`
-// the counts at q, and in .a how far inside the traced window q lies (0 outside, rising over a soft edge to 1)
-vec4 counts(highp sampler2D h,vec2 q,vec2 size){
-  // bilinear by hand (float textures cannot always be filtered), so a magnified exposure stays smooth
-  vec2 x=q-.5,f=fract(x); ivec2 i=ivec2(floor(x)),m=ivec2(size)-1;
-  // soft edges, so the end of a traced window never shows as a line
-  vec2 edge=min(q,size-q)/(.22*size);
-  float soft=smoothstep(0.,1.,clamp(min(edge.x,edge.y),0.,1.));
-  if(soft<=0.)return vec4(0);
-  vec3 a=texelFetch(h,clamp(i,ivec2(0),m),0).rgb,b=texelFetch(h,clamp(i+ivec2(1,0),ivec2(0),m),0).rgb;
-  vec3 c=texelFetch(h,clamp(i+ivec2(0,1),ivec2(0),m),0).rgb,d=texelFetch(h,clamp(i+ivec2(1,1),ivec2(0),m),0).rgb;
-  return vec4(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),soft);
+vec3 acc0, acc1;
+void layer(int i, highp sampler2D t, vec2 fd){
+  if(uOn[i]<.5)return;
+  vec2 uv=(uM[i]*fd+uOff[i])/uSize[i];
+  vec2 e=min(uv,1.-uv)/uEdge;
+  float soft=smoothstep(0.,1.,clamp(min(e.x,e.y),0.,1.));
+  if(soft<=0.)return;
+  vec3 v=texture(t,uv).rgb;
+  vec3 d=exp(uLmin[i]+v*(uLmax[i]-uLmin[i]))*step(vec3(.6/255.),v);
+  if(uGrp[i]<.5)acc0=mix(acc0,d,soft);else acc1=mix(acc1,d,soft);
 }
-vec3 paint(vec3 h,vec3 low,vec3 norm){
-  vec3 v=clamp(pow(max(h-low,0.)*norm,vec3(.6)),0.,1.2);
+vec3 paint(vec3 d){
+  vec3 v=clamp(pow(max(d-uLow,0.)/max(uHigh-uLow,vec3(1e-30)),vec3(.6)),0.,1.2);
   float t=-uTime*uFlow;
   vec3 col=v.r*palette(t)+v.g*palette(t+.33)*.9+v.b*palette(t+.66)*.8;
   return (col+pow(v.r*v.g*v.b,1.5)*uGlow*.6)*.8;
 }
 void main(){
   vec2 fd=gl_FragCoord.xy-vec2(.5*uRes.x,.5*uRes.y+uLiftPx);
-  vec3 col=vec3(0);
-  // blended pixel by pixel: the next view shows wherever it has picture, through a soft edge, and the view we
-  // are leaving fills the rest, so the hand-over moves across the screen with the zoom instead of popping
-  vec4 a=uWA>0.?counts(uHistA,uMA*fd+uOffA,uSizeA):vec4(0),b=uWB>0.?counts(uHistB,uMB*fd+uOffB,uSizeB):vec4(0);
-  float tb=uWB*b.a;
-  if(uWA>0.)col+=paint(a.rgb,uLowA,uNormA)*a.a*uWA*(1.-tb);
-  if(uWB>0.)col+=paint(b.rgb,uLowB,uNormB)*tb;
-  col+=vec3(.008,.004,.02);
+  acc0=vec3(0);acc1=vec3(0);
+  layer(0,uT0,fd);layer(1,uT1,fd);layer(2,uT2,fd);layer(3,uT3,fd);layer(4,uT4,fd);layer(5,uT5,fd);
+  vec3 col=paint(mix(acc0,acc1,uGmix))+vec3(.008,.004,.02);
   o=vec4(finish(col,gl_FragCoord.xy,uRes),1.);
 }`;
 
@@ -644,23 +638,14 @@ function camAt(T){
     C.at=[0,1,2].map(function(i){return lerp((A.at||[0,0,0])[i],(B.at||[0,0,0])[i],e);});
     C.span=C.dist;
   }else{
-    // the Buddhabrot zooms from one view to the next: the old exposure is carried along and fades, while the
-    // next view starts developing at once and fades in as it fills
+    // the Buddhabrot zooms and pans through its images (tools/buddha-render.mjs follows this same path to know
+    // which images to make: keep the two in step)
     var e=fr<=0?0:glide(fr,RAMP/g.secs);
     var la=Math.log(A.span),lb=Math.log(B.span),Ls=la+(lb-la)*e,sp=Math.exp(Ls);
     // pan in step with the zoom, so the point we are heading for moves steadily across the screen
     var w=Math.abs(A.span-B.span)>1e-9?(A.span-sp)/(A.span-B.span):e;
     C.re=lerp(A.re,B.re,w);C.im=lerp(A.im,B.im,w);C.span=sp;C.rot=lerpAngle(A.turn,B.turn,e)*Math.PI/180;
-    C.stageA=k%n;C.stageB=(k+1)%n;C.stage=fr>0?C.stageB:C.stageA;C.limits=STAGES[C.stage].limits;
-    // each exposure shows only once it covers the screen (a window still smaller than the view would show as a
-    // box), and the one we leave gives way as the next takes over
-    // how far into the move the next exposure is allowed to take over; draw() weighs it by how much of the
-    // screen it really covers (which also keeps the one we leave until the next fills the screen)
-    // pulling back, the wider view takes over early and the one we leave dissolves as it shrinks (wA below);
-    // diving, the next view comes in across the move
-    var out=B.span>A.span*1.01;
-    C.tB=fr<=0?0:smoother((fr-.02)/(out?.3:.55));
-    C.fadeA=out?smoother((A.span*1.35/sp-.75)/.6):1;
+    C.stageA=k%n;C.stageB=(k+1)%n;C.stage=fr>0&&e>=.5?C.stageB:C.stageA;C.limits=STAGES[C.stage].limits;C.e=e;
     C.mix=e;
   }
   C.flow=lerp(A.flow,B.flow,C.mix);C.density=lerp(A.density,B.density,C.mix);C.glow=lerp(A.glow,B.glow,C.mix);
@@ -668,167 +653,74 @@ function camAt(T){
 }
 
 // =====================================================================================================
-// The Buddhabrot tracer. The same function runs in a worker (normally) or on the page, a fixed amount
-// per frame (when filming, so every frame of a film is the same however fast the machine is)
+// The Buddhabrot images: loaded when needed (and the next move's ahead of time), at most eight kept on the GPU
 // =====================================================================================================
-function buddhaTracer(){
-  var st=null,seed=1;
-  function rnd(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;}
-  function start(p){
-    st=p;seed=p.seed||12345;st.hist=new Float32Array(p.w*p.h*4);st.traced=0;
-    var L=Math.max(p.limits[0],p.limits[1],p.limits[2]);st.minK=p.limits[3]||12;st.L=L;
-    st.ox=new Float64Array(L+1);st.oy=new Float64Array(L+1);
-    // a window smaller than the figure is sampled with Metropolis-Hastings (below)
-    st.zoom=p.span<2.4;
-    st.cur={idx:new Int32Array(2*L+2),n:0,k:0,cr:0,ci:0};st.tmp={idx:new Int32Array(2*L+2),n:0,k:0,cr:0,ci:0};
-  }
-  // which histogram cell a point of a path lands in, or -1 outside the window
-  function cell(x,y){
-    var dx=x-st.re,dy=y-st.im,u=(dx*st.cos+dy*st.sin)/st.pix,v=(-dx*st.sin+dy*st.cos)/st.pix;
-    var px=Math.floor(st.w/2+u),py=Math.floor(st.h/2+v+st.lift);
-    return px<0||py<0||px>=st.w||py>=st.h?-1:(py*st.w+px)*4;
-  }
-  function add(i,k,w){
-    var l=st.limits,h=st.hist;
-    if(k<=l[0])h[i]+=w;
-    if(k<=l[1])h[i+1]+=w;
-    if(k<=l[2])h[i+2]+=w;
-  }
-  // follow 0 under z -> z^2 + c; the cells its escaping path (and its mirror image, which c's conjugate traces)
-  // crosses go into into.idx. Returns how many: 0 for a path that never escapes, or escapes too soon
-  function trace(cr,ci,into){
-    into.n=0;
-    var q=(cr-.25)*(cr-.25)+ci*ci;
-    if(q*(q+(cr-.25))<.25*ci*ci||(cr+1)*(cr+1)+ci*ci<.0625)return 0;   // inside the two largest regions: never escapes
-    var ox=st.ox,oy=st.oy,L=st.L,x=0,y=0,k=0,esc=false;
-    for(k=1;k<=L;k++){var t=x*x-y*y+cr;y=2*x*y+ci;x=t;ox[k]=x;oy[k]=y;if(x*x+y*y>4){esc=true;break;}}
-    if(!esc||k<st.minK)return 0;
-    for(var j=2;j<k;j++){
-      var a=cell(ox[j],oy[j]);if(a>=0)into.idx[into.n++]=a;
-      var b=cell(ox[j],-oy[j]);if(b>=0)into.idx[into.n++]=b;
-    }
-    into.k=k;into.cr=cr;into.ci=ci;
-    return into.n;
-  }
-  function run(samples){
-    if(!st)return;
-    for(var s=0;s<samples;s++){
-      if(!st.zoom){
-        // the whole figure: random c, every path drawn as it is
-        trace(rnd()*3.2-2.15,rnd()*3.2-1.6,st.tmp);st.traced++;
-        for(var j=0;j<st.tmp.n;j++)add(st.tmp.idx[j],st.tmp.k,1);
-        continue;
-      }
-      // A small window: Metropolis-Hastings. Mostly try small changes of a path that crossed the window (now
-      // and then a fresh random one), accept with probability (cells crossed now / cells crossed before), and
-      // draw the current path with weight 1 / its cells crossed. Busy paths are found far more often, and the
-      // weight cancels that out, so the picture is the one random sampling would give, found much faster.
-      var cur=st.cur,cr,ci;
-      if(!cur.n||rnd()<.12){cr=rnd()*3.2-2.15;ci=rnd()*3.2-1.6;}
-      else{var r=Math.pow(10,-7+5.5*rnd()),a=rnd()*6.2831853;cr=cur.cr+r*Math.cos(a);ci=cur.ci+r*Math.sin(a);}
-      var n=trace(cr,ci,st.tmp);st.traced++;
-      if(n>0&&(!cur.n||rnd()*cur.n<n)){var t=st.cur;st.cur=st.tmp;st.tmp=t;cur=st.cur;}
-      if(cur.n){var w=1/cur.n;for(var m=0;m<cur.n;m++)add(cur.idx[m],cur.k,w);}
-    }
-  }
-  // what a worker sends: the counts added since last time (the page adds up every worker's)
-  // the page sends buffers back once it has added them up, so nothing new is allocated (each was megabytes,
-  // several times a second, and the clean-ups after them stuttered the page)
-  var spare=[];
-  function give(b){if(st&&b.length===st.hist.length&&spare.length<3){b.fill(0);spare.push(b);}}
-  function take(){var h=st.hist,t=st.traced;st.hist=spare.pop()||new Float32Array(h.length);st.traced=0;return {hist:h,traced:t};}
-  return {start:start,run:run,take:take,give:give,state:function(){return st;}};
-}
-// exposure from a high percentile, not the maximum, so a few hot pixels cannot darken the picture
-// and from a low percentile, not zero: up close the figure is a glow over the whole window, and its
-// structure only shows when that floor is taken away. Returns [hi r, g, b, lo r, g, b]
-function histLevels(h,n){
-  var out=[1,1,1,0,0,0];
-  for(var ch=0;ch<3;ch++){
-    var sample=[];
-    for(var i=ch;i<h.length;i+=4*Math.max(1,Math.floor(n/6000)))sample.push(h[i]);
-    sample.sort(function(a,b){return a-b;});
-    var lo=sample[Math.floor(sample.length*.03)]||0,hi=sample[Math.floor(sample.length*.9995)]||0;
-    out[ch]=hi>lo?hi:lo+1;out[ch+3]=lo;
-  }
-  return out;
-}
-// two exposures: slot 0 and 1 hold a stage's histogram each, added up from every worker's counts
-var buddha={slots:[0,1].map(function(){var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);nearest();return {tex:t,key:"",cam:null,levels:[1,1,1,0,0,0],traced:0,acc:null,dirty:false,up:0,lv:0};}),
-  tracing:-1,key:"",workers:null,local:null};
+var BL={layers:null,loading:false,stages:{},edge:.12,enc:{},prefetchAt:0};
 var FILM=/[?&]film/.test(Q);
-// Workers: half the cores less one, at most four, each resting a fifth of the time. Six workers on every
-// spare core starved the sound (it crackled) and the page's own drawing (it stuttered)
-var BUDDHA_WORKERS=Math.max(1,Math.min(4,Math.floor((navigator.hardwareConcurrency||4)/2)-1));
-function buddhaKey(st){return [SET.id,st,W,H,lift].join(",");}
-function slotFor(key){for(var i=0;i<2;i++)if(buddha.slots[i].key===key)return buddha.slots[i];return null;}
-function buddhaStart(stage,keep){
-  var S=STAGES[stage],key=buddhaKey(stage);
-  // a view already developing carries on where it is (restarting it threw away seconds of tracing)
-  var have=slotFor(key);
-  // otherwise reuse the slot not showing the view we are leaving
-  var i=have?buddha.slots.indexOf(have):buddha.slots[0].key===keep?1:0,slot=buddha.slots[i];
-  // traced a little wider than the view, so the zoom towards it has picture at the edges; at most about
-  // 1.2 million cells (the shader smooths them), so adding up every worker's counts stays cheap at full HD
-  // a zoomed window gets a coarser grid: every cell then collects more paths, which halves the grain, and
-  // the glow up close is soft anyway
-  var cells=W*1.35*H*1.35,hs=Math.min(1,Math.sqrt((S.span<2.4?3.5e5:1.2e6)/cells));
-  var w=Math.max(64,Math.round(W*1.35*hs)),h=Math.max(64,Math.round(H*1.35*hs)),rot=S.turn*Math.PI/180;
-  var pix=S.span/Math.max(1,Math.min(W,H))/hs;
-  var p={w:w,h:h,re:S.re,im:S.im,span:S.span,pix:pix,cos:Math.cos(rot),sin:Math.sin(rot),limits:S.limits,lift:lift*H*hs,seed:7+stage,key:key,slot:i};
-  if(!have){
-    slot.key=key;slot.cam={re:S.re,im:S.im,rot:rot,pix:pix,w:w,h:h,lift:p.lift};slot.levels=[1,1,1,0,0,0];slot.traced=0;
-    slot.acc=new Float32Array(w*h*4);slot.dirty=false;slot.up=0;slot.lv=0;slot.shown=null;
-    gl.bindTexture(gl.TEXTURE_2D,slot.tex);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,slot.acc);
-  }else p.seed+=slot.traced%9973;   // fresh random numbers for the paths still to come
-  buddha.key=key;buddha.tracing=i;
-  if(FILM||!window.Worker){buddha.local=buddha.local||buddhaTracer();buddha.local.start(p);return;}
-  if(!buddha.workers){
-    var src="var T=("+buddhaTracer.toString()+")();var gen=0;"+
-      "onmessage=function(e){if(e.data.give){T.give(e.data.give);return;}if(e.data.stop){gen++;return;}T.start(e.data);var g=++gen,d=e.data;"+
-      "(function loop(){if(g!==gen)return;var t0=Date.now();while(Date.now()-t0<400)T.run(1000);"+
-      "var r=T.take();postMessage({hist:r.hist,traced:r.traced,key:d.key,slot:d.slot},[r.hist.buffer]);setTimeout(loop,100);})();};";
-    try{
-      var url=URL.createObjectURL(new Blob([src],{type:"text/javascript"}));
-      buddha.workers=[];
-      for(var k=0;k<BUDDHA_WORKERS;k++){
-        var wk=new Worker(url);
-        wk.onmessage=function(e){
-          var sl=buddha.slots[e.data.slot],d=e.data.hist;
-          if(e.data.key===sl.key&&sl.acc&&sl.acc.length===d.length){
-            var a=sl.acc;for(var j=0;j<a.length;j++)a[j]+=d[j];
-            sl.traced+=e.data.traced;sl.dirty=true;
-          }
-          this.postMessage({give:d},[d.buffer]);
-        };
-        buddha.workers.push(wk);
-      }
-    }catch(e){buddha.workers=null;buddha.local=buddhaTracer();buddha.local.start(p);return;}
+function buddhaManifest(){
+  if(BL.layers||BL.loading)return;BL.loading=true;
+  getJSON("data/buddha/layers.json").then(function(m){
+    BL.edge=m.edge;BL.enc=m.encoding;BL.stages=m.stages;
+    BL.layers=m.layers.map(function(l){var L=Object.assign({},l);L.rotR=l.rot*Math.PI/180;L.pix=l.hc/l.h;L.tex=null;L.state=0;L.used=0;return L;});
+  }).catch(function(e){console.error(e);BL.loading=false;});
+}
+function loadLayer(L){
+  if(L.state)return;L.state=1;
+  var img=new Image();img.decoding="async";
+  img.onload=function(){
+    var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+    // mipmaps: an image shown smaller than its own pixels (pulling back) stays smooth instead of sparkling
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    L.tex=t;L.state=2;L.used=performance.now();
+    var loaded=BL.layers.filter(function(x){return x.state===2;}).sort(function(a,b){return a.used-b.used;});
+    // never throw out one drawn in the last few seconds
+    var now=performance.now();
+    for(var i=0;i<loaded.length-8;i++){if(now-loaded[i].used<3000)continue;gl.deleteTexture(loaded[i].tex);loaded[i].tex=null;loaded[i].state=0;}
+  };
+  img.onerror=function(){L.state=3;};
+  img.src="data/buddha/"+L.file;
+}
+// where the view lies in an image: the matrix and offset the shader needs, and the view's centre and half size
+// in the image's pixels
+function layerView(L,C){
+  var cpix=C.span/Math.min(W,H),k=cpix/L.pix,a=C.rot-L.rotR,ca=Math.cos(a)*k,sa=Math.sin(a)*k;
+  var cf=Math.cos(-L.rotR),sf=Math.sin(-L.rotR),dr=C.re-L.re,di=C.im-L.im,u=(cf*dr-sf*di)/L.pix,v=(sf*dr+cf*di)/L.pix;
+  return {M:[ca,sa,-sa,ca],off:[u+L.w/2,v+L.h/2],u:u,v:v,hu:W/2*k,hv:(H/2+lift*H)*k};
+}
+function overlaps(L,C){var q=layerView(L,C);return Math.abs(q.u)-q.hu<L.w/2&&Math.abs(q.v)-q.hv<L.h/2;}
+// worth having for this view: it overlaps the screen and is not far finer than the screen can show (at the whole
+// figure every finer image overlaps; loading them all at once, and the GPU limit throwing them out again, kept
+// the view from ever being ready)
+// the coarsest image of a group that overlaps the view is always used, as the base everything else lies on
+function useful(L,C,group){return L.group===group&&overlaps(L,C)&&(L.pix>=C.span/Math.min(W,H)*.4||coversView(L,C)||L===baseOf(group,C));}
+function baseOf(group,C){
+  var best=null;BL.layers.forEach(function(L){if(L.group===group&&overlaps(L,C)&&(!best||L.pix>best.pix))best=L;});
+  return best;
+}
+function coversView(L,C){var q=layerView(L,C),m=.5-BL.edge;return Math.abs(q.u)+q.hu<=L.w*m&&Math.abs(q.v)+q.hv<=L.h*m;}
+var groupOf=function(lim){return lim.join("/");};
+// the images to draw for one group: the finest that covers the whole view, and up to two finer ones on top
+function chooseLayers(group,C){
+  var list=BL.layers.filter(function(L){return useful(L,C,group);}).sort(function(a,b){return b.pix-a.pix;});
+  list.forEach(loadLayer);
+  var have=list.filter(function(L){return L.state===2;}),f=0;
+  for(var i=0;i<have.length;i++)if(coversView(have[i],C))f=i;
+  var chosen=have.slice(f);
+  if(chosen.length>3)chosen=[chosen[0]].concat(chosen.slice(-2));
+  return {chosen:chosen,ready:list.every(function(L){return L.state>=2;})};
+}
+// ask for the images this move and the next will need, before they are on screen
+function buddhaPrefetch(){
+  var now=performance.now();if(now-BL.prefetchAt<500)return;BL.prefetchAt=now;
+  var k=Math.floor(T+1e-9);
+  for(var f=0;f<=1.001;f+=.125){
+    [k+f,k+1+f].forEach(function(t){var C=camAt(t%LAST);BL.layers.forEach(function(L){if(useful(L,C,groupOf(STAGES[C.stage].limits)))loadLayer(L);});});
   }
-  // each worker traces with its own random numbers
-  buddha.workers.forEach(function(wk,n){var q=Object.assign({},p);q.seed=p.seed*7919+n*104729+1;wk.postMessage(q);});
 }
-function buddhaStop(){if(buddha.workers)buddha.workers.forEach(function(w){w.postMessage({stop:true});});buddha.key="";buddha.slots.forEach(function(s){s.key="";});}
-// the summed counts go to the GPU at most five times a second; the exposure is worked out twice a second
-function buddhaUpload(){
-  var now=performance.now();
-  buddha.slots.forEach(function(sl){
-    if(!sl.dirty||!sl.acc||now-sl.up<200)return;
-    gl.bindTexture(gl.TEXTURE_2D,sl.tex);
-    gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,sl.cam.w,sl.cam.h,gl.RGBA,gl.FLOAT,sl.acc);
-    sl.dirty=false;sl.up=now;
-    if(now-sl.lv>500){sl.levels=histLevels(sl.acc,sl.cam.w*sl.cam.h);sl.lv=now;}
-  });
-}
-function buddhaLocalStep(){
-  if(!buddha.local||!buddha.local.state()||buddha.tracing<0)return;
-  buddha.local.run(FILM?24000:5000);
-  var r=buddha.local.take(),slot=buddha.slots[buddha.tracing];
-  if(slot.acc&&slot.acc.length===r.hist.length){var a=slot.acc;for(var j=0;j<a.length;j++)a[j]+=r.hist[j];slot.traced+=r.traced;slot.dirty=true;}
-  buddha.frames=(buddha.frames||0)+1;
-  if(FILM&&buddha.frames%4===0){slot.lv=0;slot.up=0;}
-}
+var buddhaReady=true;
 
 // =====================================================================================================
 // Text, as in The Unfolding: letters arrive one by one, then the note word by word
@@ -916,7 +808,7 @@ var lift=0;
 // the picture's centre sits a little above the middle, clear of the text panel (not in no-text mode)
 function measureLift(){
   var want=document.body.classList.contains("clean")?0:Math.min(.22,Math.max(0,(hudEl.offsetHeight-60)/Math.max(1,canvas.clientHeight)/2.6));
-  if(want!==lift){lift=want;dirty=true;if(SET&&SET.kind==="buddha")buddha.key="";}
+  if(want!==lift){lift=want;dirty=true;}
 }
 var reserveTimer=0;
 window.addEventListener("resize",function(){clearTimeout(reserveTimer);reserveTimer=setTimeout(reserveText,150);dirty=true;});
@@ -1159,7 +1051,6 @@ function useSet(id,stageAt){
   var set=SETS.filter(function(s){return s.id===id;})[0]||SETS[0];
   if(SET&&SET.id===set.id&&stageAt===undefined)return;
   var wasPlaying=playing;stop();
-  if(SET&&SET.kind==="buddha"&&set.kind!=="buddha")buddhaStop();
   SET=set;STAGES=set.stages;LAST=STAGES.length;slider.max=LAST;
   HOME={re:STAGES[0].re,im:STAGES[0].im,span:STAGES[0].span};
   var ticks=document.getElementById("ticks");ticks.textContent="";
@@ -1169,7 +1060,7 @@ function useSet(id,stageAt){
   markSets();
   document.querySelector(".mark b").textContent="Psychedelic "+set.name;
   if(SND)SND.setVoices(STAGES.map(function(s){return s.sound;}));
-  textStage=-2;buddha.key="";
+  textStage=-2;
   setT(stageAt||0);dirty=true;
   if(wasPlaying)toggle();
   try{history.replaceState(null,"","#"+(tour?"all":stageAt?set.id+"-"+STAGES[Math.round(stageAt)%LAST].id:set.id));}catch(e){}
@@ -1266,7 +1157,7 @@ function setPalettes(P,C){
 }
 function draw(C){
   var sz=wantSize();
-  if(sz[0]!==W||sz[1]!==H){sizeTargets(sz[0],sz[1]);dirty=true;buddha.key="";}
+  if(sz[0]!==W||sz[1]!==H){sizeTargets(sz[0],sz[1]);dirty=true;}
   gl.viewport(0,0,W,H);
   if(C.kind==="escape"){
     escapeCompute(C);
@@ -1296,38 +1187,36 @@ function draw(C){
     gl.uniform2f(B.u.uRes,W,H);gl.uniform1f(B.u.uLift,lift*H);
     gl.drawArrays(gl.TRIANGLES,0,3);
   }else{
-    // the next view starts developing halfway through the rest on this one (or as its words leave), so it is
-    // already well formed when the move begins; it used to start from nothing at the first step of the move
-    var traceStage=C.stage;
-    if(C.fr<=0&&playing&&!(recJourney&&recJourney.final)&&!(phase==="holding"&&hold>=dwell(C.stageA)*.5))traceStage=C.stageB;
-    var want=buddhaKey(traceStage);
-    if(want!==buddha.key)buddhaStart(traceStage,traceStage!==C.stageA?buddhaKey(C.stageA):"");
-    if(buddha.local&&(FILM||!buddha.workers))buddhaLocalStep();
-    buddhaUpload();
+    buddhaManifest();
     var D=program("buddha");gl.useProgram(D.p);
-    var cpix=C.span/Math.min(W,H),sA=slotFor(buddhaKey(C.stageA)),sB=C.tB>0?slotFor(buddhaKey(C.stageB)):null;
-    // coverage is handled pixel by pixel in the shader (each window's soft edge). Weighting the whole view by
-    // how much of the screen it covered drew a resting view at under half strength (the screen's corners sit in
-    // its soft edge), so every arrival popped darker
-    var wB=sB?C.tB:0,wA=sA?(C.fadeA===undefined?1:C.fadeA):0;
-    var layers=[["A",sA,wA],["B",sB,wB]];
-    layers.forEach(function(L,n){
-      var sl=L[1],X=L[0];
-      gl.uniform1f(D.u["uW"+X],sl?L[2]:0);
-      if(!sl)return;
-      var hc=sl.cam,k=cpix/hc.pix,a=C.rot-hc.rot,ca=Math.cos(a)*k,sa=Math.sin(a)*k,cf=Math.cos(-hc.rot),sf=Math.sin(-hc.rot);
-      var dr=C.re-hc.re,di=C.im-hc.im;
-      gl.activeTexture(gl.TEXTURE2+n);gl.bindTexture(gl.TEXTURE_2D,sl.tex);gl.uniform1i(D.u["uHist"+X],2+n);
-      gl.uniformMatrix2fv(D.u["uM"+X],false,[ca,sa,-sa,ca]);
-      gl.uniform2f(D.u["uOff"+X],(cf*dr-sf*di)/hc.pix+hc.w/2,(sf*dr+cf*di)/hc.pix+hc.h/2+hc.lift);
-      gl.uniform2f(D.u["uSize"+X],hc.w,hc.h);
-      // exposure glides towards each new reading instead of jumping (it showed as a brightness pop)
-      if(!sl.shown||sl.shown.key!==sl.key){sl.shown=sl.levels.slice();sl.shown.key=sl.key;}
-      for(var q=0;q<6;q++)sl.shown[q]+=(sl.levels[q]-sl.shown[q])*Math.min(1,lastDt*1.2);
-      var lv=sl.shown;
-      gl.uniform3f(D.u["uNorm"+X],1/Math.max(1e-9,lv[0]-(lv[3]||0)),1/Math.max(1e-9,lv[1]-(lv[4]||0)),1/Math.max(1e-9,lv[2]-(lv[5]||0)));
-      gl.uniform3f(D.u["uLow"+X],lv[3]||0,lv[4]||0,lv[5]||0);
-    });
+    var on=new Float32Array(6),grp=new Float32Array(6),Ms=new Float32Array(24),offs=new Float32Array(12),sizes=new Float32Array(12),lmin=new Float32Array(18),lmax=new Float32Array(18);
+    var gA=groupOf(STAGES[C.stageA].limits),gB=groupOf(STAGES[C.stageB].limits),two=gA!==gB&&C.e>0;
+    buddhaReady=!!BL.layers;
+    if(BL.layers){
+      buddhaPrefetch();
+      var slot=0,now=performance.now();
+      [gA].concat(two?[gB]:[]).forEach(function(g,gi){
+        var pick=chooseLayers(g,C);if(!pick.ready)buddhaReady=false;
+        pick.chosen.forEach(function(L){
+          if(slot>5)return;
+          var q=layerView(L,C),enc=BL.enc[L.group];L.used=now;
+          on[slot]=1;grp[slot]=gi;Ms.set(q.M,slot*4);offs.set(q.off,slot*2);sizes.set([L.w,L.h],slot*2);
+          lmin.set(enc.lmin,slot*3);lmax.set(enc.lmax,slot*3);
+          gl.activeTexture(gl.TEXTURE2+slot);gl.bindTexture(gl.TEXTURE_2D,L.tex);gl.uniform1i(D.u["uT"+slot],2+slot);
+          slot++;
+        });
+      });
+      // exposure: each stage's own (worked out when its image was traced), in step with the move
+      var sa=BL.stages[STAGES[C.stageA].id],sb=BL.stages[STAGES[C.stageB].id]||sa,e=C.e||0;
+      if(sa){
+        gl.uniform3fv(D.u.uLow,[0,1,2].map(function(c){return lerp(sa.low[c],sb.low[c],e);}));
+        gl.uniform3fv(D.u.uHigh,[0,1,2].map(function(c){return Math.exp(lerp(Math.log(sa.high[c]),Math.log(sb.high[c]),e));}));
+      }
+    }
+    for(var u=0;u<6;u++)if(!on[u]){gl.activeTexture(gl.TEXTURE2+u);gl.bindTexture(gl.TEXTURE_2D,null);gl.uniform1i(D.u["uT"+u],2+u);}
+    gl.uniform1fv(D.u.uOn,on);gl.uniform1fv(D.u.uGrp,grp);gl.uniformMatrix2fv(D.u.uM,false,Ms);gl.uniform2fv(D.u.uOff,offs);gl.uniform2fv(D.u.uSize,sizes);
+    gl.uniform3fv(D.u.uLmin,lmin);gl.uniform3fv(D.u.uLmax,lmax);
+    gl.uniform1f(D.u.uEdge,BL.edge);gl.uniform1f(D.u.uGmix,two?smoother(C.e):0);
     gl.uniform2f(D.u.uRes,W,H);gl.uniform1f(D.u.uLiftPx,lift*H);
     setPalettes(D,C);
     gl.uniform1f(D.u.uTime,time);gl.uniform1f(D.u.uFlow,C.flow);gl.uniform1f(D.u.uGlow,C.glow);
@@ -1347,8 +1236,8 @@ function hud(C){
     itEl.textContent="camera "+C.dist.toFixed(3)+" from the centre";
     whereEl.textContent="9 iterations per step, up to 180 steps per ray";
   }else{
-    var tr=buddha.tracing>=0?buddha.slots[buddha.tracing].traced:0;
-    magEl.textContent=Math.round(tr*2).toLocaleString("en-GB")+" paths traced"+(HOME.span/C.span>1.05?" · magnification "+mag(C.span):"");
+    var info=BL.stages[STAGES[C.stage].id];
+    magEl.textContent=(info?Math.round(info.paths/1e6).toLocaleString("en-GB")+" million paths, traced in advance":"loading the traced images")+(HOME.span/C.span>1.05?" · magnification "+mag(C.span):"");
     itEl.textContent="limits "+C.limits.map(function(l){return l.toLocaleString("en-GB");}).join(" / ")+" (red / green / blue)";
     whereEl.textContent="";
   }
@@ -1442,7 +1331,7 @@ function frame(now){
   if(acc>=1){fpsEl.textContent="prototype 2.0 / "+Math.round(frames/acc)+" fps / "+W+"×"+H;frames=0;acc=0;}
   requestAnimationFrame(frame);
 }
-window.__mandel={bslots:function(){return buddha.slots.map(function(x){return {key:x.key,traced:x.traced};}).concat([buddha.key]);},leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
+window.__mandel={get bl(){return BL;},get ready(){return !SET||SET.kind!=="buddha"||buddhaReady;},leg:function(k){return legOf(k);},dwell:function(k){return dwell(k);},get strips(){return strips;},get frameMs(){return frameMs;},camAt:camAt,setT:setT,useSet:useSet,get T(){return T;},get progress(){return progress;},get phase(){return phase;},
   get playing(){return playing;},get set(){return SET&&SET.id;},stages:function(){return STAGES;},span:0};
 requestAnimationFrame(frame);
 })();
