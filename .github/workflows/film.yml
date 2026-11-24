@@ -27,10 +27,10 @@ jobs:
       matrix:
         set: ${{ fromJSON(inputs.set == 'every' && '["mandelbrot","julia","ship","bulb","buddha"]' || format('["{0}"]', inputs.set)) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22 }
-      - run: npm i --no-save playwright-core@1.47.2 @fontsource/cormorant-garamond @fontsource/ibm-plex-mono
+      - run: npm i --no-save playwright-core@1.47.2 @fontsource/cormorant-garamond@5.3.0 @fontsource/ibm-plex-mono@5.3.0
       - run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Render
         run: |
@@ -42,7 +42,7 @@ jobs:
             --width ${{ inputs.width }} --height ${{ inputs.height }} --fps ${{ inputs.fps }} \
             --from $FROM ${TO:+--to $TO} --scale ${{ inputs.scale }} \
             ${{ inputs.clean && '--clean' || '' }} --chrome "$(which google-chrome)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: psychedelic-${{ matrix.set }}-${{ inputs.width }}x${{ inputs.height }}
           path: |
@@ -55,17 +55,17 @@ jobs:
     if: inputs.set == 'every'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22 }
       - run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { path: films, merge-multiple: true }
       - run: |
           node tools/join.mjs --out psychedelic-all.mp4 --fade 4 \
             films/psychedelic-mandelbrot.mp4 films/psychedelic-julia.mp4 films/psychedelic-ship.mp4 \
             films/psychedelic-bulb.mp4 films/psychedelic-buddha.mp4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: psychedelic-all-${{ inputs.width }}x${{ inputs.height }}
           path: psychedelic-all.mp4
