@@ -515,7 +515,9 @@ function referenceOrbit(formula,cr,ci,kr,ki,maxIter){
 // Smooth motion. Computing a deep view takes a slow GPU several frames' worth of time, which used to show as a
 // stutter. Instead the view is computed in strips, a few per frame, for where the camera will be when it is done,
 // while every frame shows the last finished view moved, scaled and turned to where the camera is now.
-var MARGIN=1.2,W=0,H=0,DW=0,DH=0;
+// A film computed fresh every frame (?film without strips) needs no margin: at 4K, supersampled, the margin
+// alone cost the GPU half a gigabyte
+var MARGIN=/[?&]film/.test(location.search)&&!/[?&]strips=([2-9]|1\d)/.test(location.search)?1:1.2,W=0,H=0,DW=0,DH=0;
 var targets=[0,1].map(function(){return {tex:gl.createTexture(),fbo:gl.createFramebuffer()};});
 var front={t:targets[0],cam:null},back={t:targets[1],cam:null,active:false,strip:0,strips:1,len:0};
 var strips=1,stripTimer=0;
@@ -544,7 +546,8 @@ var FIXED=/[?&]scale=([\d.]+)/.exec(Q);
 qBtn.addEventListener("click",function(){qi=(qi+1)%SCALES.length;qBtn.textContent=SCALES[qi]?Math.round(SCALES[qi]*100)+"%":"Auto";dirty=true;});
 function wantSize(){
   if(recSize)return recSize;
-  var dpr=Math.min(window.devicePixelRatio||1,2);
+  // a film takes the pixel ratio it is given (tools/film.mjs: 4 for 4K supersampled from 1920x1080 of layout)
+  var dpr=FILM?(window.devicePixelRatio||1):Math.min(window.devicePixelRatio||1,2);
   var s=FIXED?parseFloat(FIXED[1]):SCALES[qi]||autoScale;
   var w=canvas.clientWidth*dpr*s,h=canvas.clientHeight*dpr*s;
   // Auto never draws more than about full HD: a large Retina screen asked for nearly 3 million pixels a
@@ -671,9 +674,11 @@ function camAt(T){
 // =====================================================================================================
 var BL={layers:null,loading:false,stages:{},edge:.12,enc:{},prefetchAt:0};
 var FILM=/[?&]film/.test(Q);
+// ?buddha=4k: the larger images traced for 4K films (node tools/buddha-render.mjs --4k), if present
+var BUDDHA_DIR=/[?&]buddha=4k(&|$)/.test(Q)?"data/buddha-4k/":"data/buddha/";
 function buddhaManifest(){
   if(BL.layers||BL.loading)return;BL.loading=true;
-  getJSON("data/buddha/layers.json").then(function(m){
+  getJSON(BUDDHA_DIR+"layers.json").then(function(m){
     BL.edge=m.edge;BL.enc=m.encoding;BL.stages=m.stages;
     BL.layers=m.layers.map(function(l){var L=Object.assign({},l);L.rotR=l.rot*Math.PI/180;L.pix=l.hc/l.h;L.tex=null;L.state=0;L.used=0;return L;});
   }).catch(function(e){console.error(e);BL.loading=false;});
@@ -695,7 +700,7 @@ function loadLayer(L){
     for(var i=0;i<loaded.length-8;i++){if(now-loaded[i].used<3000)continue;gl.deleteTexture(loaded[i].tex);loaded[i].tex=null;loaded[i].state=0;}
   };
   img.onerror=function(){L.state=3;};
-  img.src="data/buddha/"+L.file;
+  img.src=BUDDHA_DIR+L.file;
 }
 // where the view lies in an image: the matrix and offset the shader needs, and the view's centre and half size
 // in the image's pixels
@@ -1168,13 +1173,20 @@ function escapeCompute(C){
   if(!back.active)return;
   var B=back.cam,P=program(B.formula),h0=Math.floor(DH*back.strip/back.strips),h1=Math.floor(DH*(back.strip+1)/back.strips);
   gl.bindFramebuffer(gl.FRAMEBUFFER,back.t.fbo);gl.viewport(0,0,DW,DH);
-  gl.enable(gl.SCISSOR_TEST);gl.scissor(0,h0,DW,h1-h0);
+  gl.enable(gl.SCISSOR_TEST);
   gl.useProgram(P.p);
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,refTex);gl.uniform1i(P.u.uRef,0);
   gl.uniform1i(P.u.uRefLen,back.len);gl.uniform1i(P.u.uMaxIter,B.iter);
   gl.uniform2f(P.u.uRes,DW,DH);gl.uniform2f(P.u.uRot,Math.cos(B.rot),Math.sin(B.rot));
   gl.uniform1f(P.u.uPix,B.span/Math.min(W,H));gl.uniform1f(P.u.uLift,B.lift);
-  gl.drawArrays(gl.TRIANGLES,0,3);
+  // a film's strip can be a 4K view supersampled (33 million pixels, 20,000 steps deep): drawn in one call it
+  // can outlast the browser's GPU watchdog, so it goes in slices of about four million pixels
+  var n=FILM?Math.max(1,Math.ceil(DW*(h1-h0)/4e6)):1;
+  for(var s=0;s<n;s++){
+    var a0=h0+Math.floor((h1-h0)*s/n),a1=h0+Math.floor((h1-h0)*(s+1)/n);
+    gl.scissor(0,a0,DW,a1-a0);gl.drawArrays(gl.TRIANGLES,0,3);
+    if(n>1)gl.flush();
+  }
   gl.disable(gl.SCISSOR_TEST);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,W,H);
   if(++back.strip>=back.strips){

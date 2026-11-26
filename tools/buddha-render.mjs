@@ -2,6 +2,8 @@
 //
 //   node tools/buddha-render.mjs [--whole 60 --zoom 90 --between 45]   (seconds of tracing per image, all cores)
 //   node tools/buddha-render.mjs --quick                                (a few seconds each, to try the pipeline)
+//   node tools/buddha-render.mjs --4k                                   (images twice the size, for 4K films, into
+//                                                                        data/buddha-4k/: not committed, too big)
 //
 // Needs Node 20+ and Python 3 with Pillow (it writes the JPEGs). The Buddhabrot never changes, so tracing it live
 // on the viewer's machine (as the page once did) only cost time, grain and processor cores the sound needed.
@@ -27,14 +29,16 @@ const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i > 0 ?
 const QUICK = process.argv.includes("--quick");
 const SECS = { whole: +arg("whole", QUICK ? 3 : 60), zoom: +arg("zoom", QUICK ? 4 : 90), between: +arg("between", QUICK ? 3 : 45) };
 const THREADS = Math.max(1, +arg("threads", cpus().length));
-const OUT = path.join(root, "data/buddha");
+// --4k: every image twice as wide and high, chosen for a 2160-line screen, kept out of the repository
+const K4 = process.argv.includes("--4k");
+const OUT = path.join(root, K4 ? "data/buddha-4k" : "data/buddha");
 
 const ASPECT = 16 / 9;
 const FRAME = 1.7;            // an image is this many times the height of the view it is for
 const EDGE = 0.12;            // the page fades each image out over this fraction of its size at every edge
 const MAX_STRETCH = +arg("stretch", 2);   // in motion, an image may be shown up to this much larger than its own pixels
-const SIZES = { stage: [3072, 1728], between: (arg("between-size", "2560x1440")).split("x").map(Number) };
-const SCREEN = 1080;          // the screen height the sizes are chosen for
+const SIZES = { stage: K4 ? [6144, 3456] : [3072, 1728], between: (arg("between-size", K4 ? "5120x2880" : "2560x1440")).split("x").map(Number) };
+const SCREEN = K4 ? 2160 : 1080;   // the screen height the sizes are chosen for
 
 const sets = JSON.parse(readFileSync(path.join(root, "data/sets.json"), "utf8")).sets;
 const stages = sets.find((s) => s.id === "buddha").stages.slice().sort((a, b) => a.stage - b.stage);
@@ -107,13 +111,14 @@ if (process.argv.includes("--plan")) {
 }
 // ---------- tracing, on every core
 function trace(layer, seconds, seed) {
-  const params = { w: layer.w, h: layer.h, re: layer.re, im: layer.im, pix: layer.pix, rot: (layer.rot * Math.PI) / 180, limits: layer.limits, minK: 12, mh: layer.mh };
+  // big images count in 32 bits per thread (exact to 16 million per cell), or a dozen threads would want 6 GB
+  const params = { w: layer.w, h: layer.h, re: layer.re, im: layer.im, pix: layer.pix, rot: (layer.rot * Math.PI) / 180, limits: layer.limits, minK: 12, mh: layer.mh, f32: layer.w * layer.h > 8e6 };
   return Promise.all(Array.from({ length: THREADS }, (_, n) => new Promise((res, rej) => {
     const wk = new Worker(new URL("./buddha-worker.mjs", import.meta.url), { workerData: { params: { ...params, seed: seed * 7919 + n * 104729 + 1 }, seconds } });
     wk.on("message", res); wk.on("error", rej);
   }))).then((parts) => {
     const sum = new Float64Array(layer.w * layer.h * 3); let samples = 0;
-    for (const p of parts) { const h = new Float64Array(p.hist.buffer); for (let i = 0; i < sum.length; i++) sum[i] += h[i]; samples += p.samples; }
+    for (const p of parts) { const h = p.hist; for (let i = 0; i < sum.length; i++) sum[i] += h[i]; samples += p.samples; }
     return { hist: sum, samples };
   });
 }

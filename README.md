@@ -36,6 +36,26 @@ Films are 1920 × 1080 (1080 × 1920 if the window is taller than it is wide, or
 
 **`tools/film.mjs` (frame by frame, in software).** Replaces the page's clock and renders every frame however slowly, with the soundtrack rendered offline from the same timeline. Without a graphics card that is slow: a deep full-HD Mandelbrot frame takes over 30 seconds, so the GitHub **Film** workflow suits short clips (one stage with `from`/`to`, lower `scale`, smaller sizes), not whole journeys. `--strips 4` computes each deep view over four frames, about four times quicker. `--set all` films the tour, and `tools/join.mjs` joins separate films with the tour's dissolves.
 
+**4K films for big screens (on a Mac).** Real-time recording is 1080p at 16 Mbit/s, which shows its pixels on a large screen. For 4K, `tools/film.mjs --4k` renders frame by frame with the Mac's graphics chip: 3840 × 2160 at 60 frames/s, each frame drawn at 7680 × 4320 and averaged down (no shimmer on fine filaments), encoded as 10-bit HEVC, with the soundtrack rendered offline. Nothing is dropped however long a frame takes.
+
+One-time setup (needs [Homebrew](https://brew.sh) and Google Chrome):
+
+```bash
+brew install node ffmpeg python
+git clone https://github.com/Honey-Badger-Labs/psychedelic-mandelbrot.git && cd psychedelic-mandelbrot
+npm i --no-save playwright-core @fontsource/cormorant-garamond @fontsource/ibm-plex-mono
+python3 -m pip install pillow
+```
+
+Then, in one terminal `python3 -m http.server 8765`, and in another:
+
+```bash
+node tools/film.mjs --4k --set mandelbrot --from 0 --to 1 --out test-4k.mp4    # one move first, to time it
+node tools/film.mjs --4k --set mandelbrot                                     # the whole journey
+```
+
+It prints the renderer (it should name the Mac's chip, e.g. "Apple M2", not SwiftShader) and an estimate of the time left. `--set` takes `mandelbrot`, `julia`, `ship`, `bulb`, `buddha` or `all`; `--clean` leaves out the text; `--codec prores` makes a ProRes master for editing (very large). For the Buddhabrot, first trace the 4K images on the Mac (all cores, about 3 hours on a 10-core Mac; they stay out of the repository): `node tools/buddha-render.mjs --4k`. Films use them when present.
+
 Debug parameters: `?set=ship&at=2.5` opens at a journey position, `&re=…&im=…&span=…` overrides that stage's view (for finding new places), `?scale=1` fixes the resolution, `?still` freezes the colour flow, `?clean` hides the text, `?autoplay` starts playing.
 
 ## The Buddhabrot's images
