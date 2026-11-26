@@ -14,6 +14,19 @@
 //   --scale    render resolution as a fraction of the frame (default 1; 0.5 is four times quicker)
 //   --strips   compute each deep view over this many frames (default 1; 4 is about four times quicker)
 //   For a vertical clip use --width 1080 --height 1920.
+//
+// Big-screen quality (run it on a Mac, whose graphics chip does in a second what software takes minutes for):
+//
+//   node tools/film.mjs --4k --set mandelbrot --out mandelbrot-4k.mp4
+//
+//   --4k       3840x2160 at 60 frames/s, supersampled 2x2, HEVC 10-bit; the 4K Buddhabrot images if traced
+//              (node tools/buddha-render.mjs --4k). Any of these can still be set on their own:
+//   --ss       supersampling: each frame drawn at this many times the width and height, then averaged down.
+//              Text and picture both, so fine filaments stop shimmering from frame to frame (default 1)
+//   --codec    h264 (default) | hevc (10-bit, smaller and cleaner at 4K) | prores (.mov master for editing; huge)
+//   --gpu      draw with the machine's graphics chip through Google Chrome (default on a Mac). --cpu forces the
+//              software renderer. The renderer in use is printed at the start: check it is not SwiftShader
+//   --headed   show the browser window (if a headless browser will not use the graphics chip)
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, createWriteStream, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -27,9 +40,18 @@ try { ({ chromium } = require("playwright-core")); } catch { ({ chromium } = req
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const arg = (name, fallback) => { const i = process.argv.indexOf("--" + name); return i > 0 ? process.argv[i + 1] : fallback; };
 const flag = (name) => process.argv.includes("--" + name);
-const W = +arg("width", 1920), H = +arg("height", 1080), FPS = +arg("fps", 30);
+const K4 = flag("4k");
+const W = +arg("width", K4 ? 3840 : 1920), H = +arg("height", K4 ? 2160 : 1080), FPS = +arg("fps", K4 ? 60 : 30);
+const SS = Math.max(1, Math.round(+arg("ss", K4 ? 2 : 1)));
+const CODEC = arg("codec", K4 ? "hevc" : "h264");
+if (!["h264", "hevc", "prores"].includes(CODEC)) throw new Error("--codec is h264, hevc or prores");
+const GPU = flag("cpu") ? false : flag("gpu") || process.platform === "darwin";
+// the page is laid out at 1080 lines (1920x1080, or 1080x1920 upright) whatever the film's size, so the text
+// sits where it does in every film; the pixel ratio makes up the rest, supersampling included
+const BASE = Math.min(W, H) / 1080, VW = Math.round(W / BASE), VH = Math.round(H / BASE);
 const SET = arg("set", "mandelbrot");
-const OUT = path.resolve(arg("out", `psychedelic-${SET}.mp4`));
+const OUT = path.resolve(arg("out", `psychedelic-${SET}${K4 ? "-4k" : ""}.${CODEC === "prores" ? "mov" : "mp4"}`));
+const B4K = arg("buddha", K4 && existsSync(path.join(root, "data/buddha-4k/layers.json")) ? "4k" : "") === "4k";
 const FROM = +arg("from", 0), TO = arg("to", null);
 const CLEAN = flag("clean"), SCALE = +arg("scale", 1);
 // compute each deep view over this many frames, showing it moved and scaled in between (as the live page does).
@@ -95,10 +117,14 @@ function virtualClock() {
 }
 
 const browser = await chromium.launch({
-  ...(CHROME ? { executablePath: CHROME } : {}),
-  args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars", "--ignore-gpu-blocklist"],
+  // on a Mac, Google Chrome itself: its headless mode draws with the graphics chip (Metal), Playwright's own does not
+  ...(CHROME ? { executablePath: CHROME } : GPU ? { channel: "chrome" } : {}),
+  headless: !flag("headed"),
+  args: GPU
+    ? ["--hide-scrollbars", "--ignore-gpu-blocklist", "--enable-gpu", ...(process.platform === "darwin" ? ["--use-angle=metal"] : [])]
+    : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars", "--ignore-gpu-blocklist"],
 });
-const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: VW, height: VH }, deviceScaleFactor: BASE * SS });
 const problems = [];
 page.on("pageerror", (e) => problems.push(e.message));
 await page.route("**/*", (r) => {
@@ -113,16 +139,30 @@ await page.route("**/*", (r) => {
   return r.abort();
 });
 await page.addInitScript(virtualClock);
-const url = `${SITE}/index.html?film&scale=${SCALE}&set=${set.id}&at=${FROM}${TOUR ? "&tour" : ""}${CLEAN ? "&clean" : ""}&strips=${STRIPS}`;
+const url = `${SITE}/index.html?film&scale=${SCALE}&set=${set.id}&at=${FROM}${TOUR ? "&tour" : ""}${CLEAN ? "&clean" : ""}&strips=${STRIPS}${B4K ? "&buddha=4k" : ""}`;
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
 const step = (ms) => page.evaluate((x) => window.__advance(x), ms);
 await page.waitForFunction(() => window.__mandel && window.__mandel.set, null, { timeout: 60000 });
 await page.evaluate(() => document.fonts.ready);
+const gpuName = await page.evaluate(() => {
+  const g = document.createElement("canvas").getContext("webgl2"), x = g && g.getExtension("WEBGL_debug_renderer_info");
+  return g ? (x ? g.getParameter(x.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) : "no WebGL2";
+});
+console.log(`${W}x${H} at ${FPS} frames/s${SS > 1 ? `, drawn at ${W * SS}x${H * SS} and averaged down` : ""}, ${CODEC}${B4K ? ", 4K Buddhabrot images" : ""}`);
+console.log("renderer:", gpuName);
+if (GPU && /swiftshader|software|llvmpipe/i.test(gpuName)) console.log("WARNING: this is the software renderer, not the graphics chip. Try --headed, or see the note at the top of this file.");
 for (let i = 0; i < +arg("warmup", 90); i++) await step(1000 / FPS);       // warm-up draws and the first text, unfilmed
 
-const silent = OUT + ".video.mp4";
+const silent = OUT + ".video" + path.extname(OUT);
+// supersampled frames are averaged down: "area" is the exact mean of each block of pixels
+const ENCODE = {
+  h264: ["-c:v", "libx264", "-preset", "medium", "-crf", "15", "-pix_fmt", "yuv420p"],
+  // fractal detail is the hardest thing to compress: a low CRF and 10 bits keep the gradients free of bands
+  hevc: ["-c:v", "libx265", "-preset", "medium", "-crf", "14", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1", "-x265-params", "log-level=error"],
+  prores: ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"],
+}[CODEC];
 const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "png", "-i", "-",
-  "-c:v", "libx264", "-preset", "medium", "-crf", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart", silent], { stdio: ["pipe", "inherit", "inherit"] });
+  ...(SS > 1 ? ["-vf", `scale=${W}:${H}:flags=area`] : []), ...ENCODE, "-movflags", "+faststart", silent], { stdio: ["pipe", "inherit", "inherit"] });
 const cdp = await page.context().newCDPSession(page);
 const track = [];
 let frame = 0, started = false, endedAt = -1, restFrom = -1;
@@ -144,7 +184,13 @@ for (;;) {
     if (time - restFrom > 7) { endedAt = time; await page.evaluate(() => document.getElementById("play").click()); }
   }
   if (endedAt >= 0 && time - endedAt >= TAIL) break;
-  if (frame % 10 === 0) process.stdout.write(`\r${frame} frames, ${s.progress.toFixed(2)} of ${SPAN} stages, ${(frame / ((Date.now() - t0) / 1000)).toFixed(2)} frames/s   `);
+  if (frame % 10 === 0) {
+    const fps = frame / ((Date.now() - t0) / 1000), done = s.progress / SPAN, spent = Date.now() - t0;
+    // a rough guess (deep stages are slower than shallow ones), once the journey is under way
+    const left = done > 0.02 && done < 1 ? (spent / done - spent) / 60000 : null;
+    const eta = left === null ? "" : `, about ${left < 90 ? left.toFixed(0) + " min" : (left / 60).toFixed(1) + " h"} left`;
+    process.stdout.write(`\r${frame} frames, ${s.progress.toFixed(2)} of ${SPAN} stages, ${fps.toFixed(2)} frames/s${eta}   `);
+  }
 }
 ff.stdin.end();
 await new Promise((r) => ff.on("close", r));
@@ -165,7 +211,7 @@ await snd.evaluate((o) => window.renderFilmAudio(o), {
 await new Promise((r) => sink.end(r));
 await browser.close();
 
-execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", silent, "-i", wav, "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", OUT]);
+execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", silent, "-i", wav, "-c:v", "copy", ...(CODEC === "prores" ? ["-c:a", "pcm_s24le"] : ["-c:a", "aac", "-b:a", "320k"]), "-shortest", "-movflags", "+faststart", OUT]);
 rmSync(silent); rmSync(wav);
-writeFileSync(OUT + ".json", JSON.stringify({ set: SET, width: W, height: H, fps: FPS, frames: frame, seconds, from: FROM, stages: SPAN, clean: CLEAN, scale: SCALE, problems }, null, 1));
+writeFileSync(OUT + ".json", JSON.stringify({ set: SET, width: W, height: H, fps: FPS, ss: SS, codec: CODEC, renderer: gpuName, buddha4k: B4K, frames: frame, seconds, from: FROM, stages: SPAN, clean: CLEAN, scale: SCALE, problems }, null, 1));
 console.log("film:", OUT, problems.length ? "\nproblems: " + problems.slice(0, 5).join(" | ") : "");
